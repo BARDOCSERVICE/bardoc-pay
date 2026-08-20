@@ -1,0 +1,1 @@
+export default function Home(){return(<main style={{padding:40,fontFamily:'Arial',background:'#050814',color:'white',minHeight:'100vh'}}><h1 style={{color:'#6EF5FF'}}>BARDOC PAY</h1><p>Versione Starter collegata a Supabase.</p></main>)}
