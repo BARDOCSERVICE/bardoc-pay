@@ -1,1434 +1,1125 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type Employee = {
-id: number;
-name: string;
-role: string;
-department: string;
+id: string;
+auth_user_id: string | null;
+full_name: string;
+tax_code: string | null;
 email: string;
-phone: string;
-status: "Attivo" | "Assente";
+active: boolean;
+created_at: string;
+phone: string | null;
+employee_code: string | null;
+hire_date: string | null;
+notes: string | null;
 };
 
-const employees: Employee[] = [
-{
-id: 1,
-name: "Dipendente 1",
-role: "Operatore Sportello",
-department: "BARDOC SERVICE",
-email: "dipendente1@bardocservice.com",
-phone: "",
-status: "Attivo",
-},
-{
-id: 2,
-name: "Dipendente 2",
-role: "Operatore Sportello",
-department: "BARDOC SERVICE",
-email: "dipendente2@bardocservice.com",
-phone: "",
-status: "Attivo",
-},
-{
-id: 3,
-name: "Dipendente 3",
-role: "Operatore Sportello",
-department: "BARDOC SERVICE",
-email: "dipendente3@bardocservice.com",
-phone: "",
-status: "Attivo",
-},
-{
-id: 4,
-name: "Dipendente 4",
-role: "Operatore Sportello",
-department: "BARDOC SERVICE",
-email: "dipendente4@bardocservice.com",
-phone: "",
-status: "Attivo",
-},
-];
+type Document = {
+id: string;
+employee_id: string;
+document_type: string;
+month: number | null;
+year: number | null;
+file_name: string;
+storage_path: string;
+created_at: string;
+};
 
 export default function Home() {
-const [activePage, setActivePage] = useState("dashboard");
-const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(
-null
-);
-const [showMenu, setShowMenu] = useState(false);
+const [session, setSession] = useState<any>(null);
+const [loading, setLoading] = useState(true);
+const [loginMode, setLoginMode] = useState(true);
 
-const menuItems = [
-{ id: "dashboard", icon: "▦", label: "Dashboard" },
-{ id: "dipendenti", icon: "♙", label: "Dipendenti" },
-{ id: "presenze", icon: "◷", label: "Presenze" },
-{ id: "ferie", icon: "☀", label: "Ferie e permessi" },
-{ id: "buste", icon: "▤", label: "Buste paga" },
-{ id: "documenti", icon: "□", label: "Documenti" },
-{ id: "calendario", icon: "□", label: "Calendario" },
-{ id: "comunicazioni", icon: "✉", label: "Comunicazioni" },
-];
+const [email, setEmail] = useState("");
+const [password, setPassword] = useState("");
 
-function renderContent() {
-switch (activePage) {
-case "dipendenti":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Dipendenti</h1>
-<p>Gestisci il personale di BARDOC SERVICE.</p>
-</div>
+const [employees, setEmployees] = useState<Employee[]>([]);
+const [documents, setDocuments] = useState<Document[]>([]);
 
-<button className="primaryButton">+ Nuovo dipendente</button>
-</div>
+const [selectedEmployee, setSelectedEmployee] =
+useState<Employee | null>(null);
 
-<div className="card">
-<div className="searchRow">
-<input
-className="search"
-placeholder="Cerca dipendente..."
-/>
+const [showEmployeeForm, setShowEmployeeForm] = useState(false);
+const [message, setMessage] = useState("");
 
-<select className="select">
-<option>Tutti</option>
-<option>Attivi</option>
-<option>Assenti</option>
-</select>
-</div>
+const [newEmployee, setNewEmployee] = useState({
+full_name: "",
+email: "",
+tax_code: "",
+phone: "",
+employee_code: "",
+hire_date: "",
+notes: "",
+});
 
-<div className="table">
-<div className="tableHeader">
-<span>Dipendente</span>
-<span>Ruolo</span>
-<span>Email</span>
-<span>Stato</span>
-<span></span>
-</div>
+useEffect(() => {
+checkSession();
 
-{employees.map((employee) => (
-<div className="tableRow" key={employee.id}>
-<div className="employeeName">
-<div className="avatar">
-{employee.name.charAt(employee.name.length - 1)}
-</div>
-<div>
-<strong>{employee.name}</strong>
-<small>{employee.department}</small>
-</div>
-</div>
+const {
+data: { subscription },
+} = supabase.auth.onAuthStateChange((_event, newSession) => {
+setSession(newSession);
 
-<span>{employee.role}</span>
-<span>{employee.email}</span>
+if (newSession) {
+loadData();
+} else {
+setEmployees([]);
+setDocuments([]);
+}
+});
 
-<span>
-<b className="status">
-<i></i>
-{employee.status}
-</b>
-</span>
+return () => subscription.unsubscribe();
+}, []);
 
-<button
-className="detailsButton"
-onClick={() => setSelectedEmployee(employee)}
->
-Apri
-</button>
-</div>
-))}
-</div>
-</div>
-</section>
-);
+async function checkSession() {
+const {
+data: { session },
+} = await supabase.auth.getSession();
 
-case "presenze":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Presenze</h1>
-<p>Controlla entrate, uscite e ore lavorate.</p>
-</div>
+setSession(session);
 
-<button className="primaryButton">+ Registra presenza</button>
-</div>
+if (session) {
+await loadData();
+}
 
-<div className="stats">
-<Stat title="Presenti oggi" value="4" />
-<Stat title="Assenti oggi" value="0" />
-<Stat title="Ore lavorate" value="32h" />
-<Stat title="Ore straordinarie" value="2h" />
-</div>
+setLoading(false);
+}
 
-<div className="card">
-<h2>Presenze di oggi</h2>
+async function loadData() {
+const {
+data: employeeData,
+error: employeeError,
+} = await supabase
+.from("employees")
+.select("*")
+.order("full_name", { ascending: true });
 
-{employees.map((employee) => (
-<div className="presenceRow" key={employee.id}>
-<div className="employeeName">
-<div className="avatar">
-{employee.name.charAt(employee.name.length - 1)}
-</div>
-<strong>{employee.name}</strong>
-</div>
+if (!employeeError) {
+setEmployees(employeeData || []);
+}
 
-<span>Entrata: 08:00</span>
-<span>Uscita: 13:30</span>
+const {
+data: documentData,
+error: documentError,
+} = await supabase
+.from("documents")
+.select("*")
+.order("created_at", { ascending: false });
 
-<b className="status">
-<i></i>
-Presente
-</b>
-</div>
-))}
-</div>
-</section>
-);
-
-case "ferie":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Ferie e permessi</h1>
-<p>Gestisci richieste e disponibilità del personale.</p>
-</div>
-
-<button className="primaryButton">+ Nuova richiesta</button>
-</div>
-
-<div className="stats">
-<Stat title="Richieste in attesa" value="2" />
-<Stat title="Ferie approvate" value="6" />
-<Stat title="Permessi" value="3" />
-<Stat title="Giorni disponibili" value="18" />
-</div>
-
-<div className="card">
-<h2>Richieste recenti</h2>
-
-<div className="request">
-<div>
-<strong>Dipendente 1</strong>
-<small>Ferie · 25/08/2026 - 29/08/2026</small>
-</div>
-
-<span className="waiting">In attesa</span>
-
-<div className="requestButtons">
-<button className="approve">Approva</button>
-<button className="reject">Rifiuta</button>
-</div>
-</div>
-
-<div className="request">
-<div>
-<strong>Dipendente 2</strong>
-<small>Permesso · 27/08/2026</small>
-</div>
-
-<span className="waiting">In attesa</span>
-
-<div className="requestButtons">
-<button className="approve">Approva</button>
-<button className="reject">Rifiuta</button>
-</div>
-</div>
-</div>
-</section>
-);
-
-case "buste":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Buste paga</h1>
-<p>Archivio delle buste paga dei dipendenti.</p>
-</div>
-
-<button className="primaryButton">+ Carica busta paga</button>
-</div>
-
-<div className="card">
-<div className="payroll">
-<div>
-<strong>Agosto 2026</strong>
-<small>Dipendente 1</small>
-</div>
-
-<span>PDF</span>
-<button className="detailsButton">Visualizza</button>
-</div>
-
-<div className="payroll">
-<div>
-<strong>Agosto 2026</strong>
-<small>Dipendente 2</small>
-</div>
-
-<span>PDF</span>
-<button className="detailsButton">Visualizza</button>
-</div>
-
-<div className="payroll">
-<div>
-<strong>Agosto 2026</strong>
-<small>Dipendente 3</small>
-</div>
-
-<span>PDF</span>
-<button className="detailsButton">Visualizza</button>
-</div>
-</div>
-</section>
-);
-
-case "documenti":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Documenti</h1>
-<p>Documenti del personale e dell'azienda.</p>
-</div>
-
-<button className="primaryButton">+ Carica documento</button>
-</div>
-
-<div className="documentGrid">
-<Document title="Contratti" icon="▤" />
-<Document title="Documenti personali" icon="□" />
-<Document title="Certificazioni" icon="✓" />
-<Document title="Buste paga" icon="€" />
-<Document title="Comunicazioni" icon="✉" />
-<Document title="Altri documenti" icon="+" />
-</div>
-</section>
-);
-
-case "calendario":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Calendario</h1>
-<p>Turni, ferie, permessi e appuntamenti.</p>
-</div>
-</div>
-
-<div className="card calendar">
-<div className="calendarTop">
-<button>‹</button>
-<h2>Agosto 2026</h2>
-<button>›</button>
-</div>
-
-<div className="week">
-<span>Lun</span>
-<span>Mar</span>
-<span>Mer</span>
-<span>Gio</span>
-<span>Ven</span>
-<span>Sab</span>
-<span>Dom</span>
-</div>
-
-<div className="days">
-{Array.from({ length: 31 }, (_, i) => (
-<div key={i} className={i + 1 === 20 ? "today" : ""}>
-{i + 1}
-</div>
-))}
-</div>
-</div>
-</section>
-);
-
-case "comunicazioni":
-return (
-<section>
-<div className="pageHeader">
-<div>
-<h1>Comunicazioni</h1>
-<p>Invia comunicazioni al personale.</p>
-</div>
-
-<button className="primaryButton">+ Nuova comunicazione</button>
-</div>
-
-<div className="card">
-<div className="message">
-<div className="messageIcon">✉</div>
-<div>
-<strong>Comunicazione aziendale</strong>
-<p>Nuovi orari operativi BARDOC SERVICE.</p>
-<small>20 agosto 2026</small>
-</div>
-</div>
-
-<div className="message">
-<div className="messageIcon">!</div>
-<div>
-<strong>Avviso al personale</strong>
-<p>Ricordiamo di registrare correttamente entrate e uscite.</p>
-<small>19 agosto 2026</small>
-</div>
-</div>
-</div>
-</section>
-);
-
-default:
-return (
-<section>
-<div className="welcome">
-<div>
-<p className="eyebrow">BARDOC SERVICE</p>
-<h1>Portale Dipendenti</h1>
-<p>
-Tutto il personale aziendale in un unico posto.
-</p>
-</div>
-
-<div className="welcomeLogo">B</div>
-</div>
-
-<div className="stats">
-<Stat title="Dipendenti" value="4" />
-<Stat title="Presenti oggi" value="4" />
-<Stat title="Ferie in attesa" value="2" />
-<Stat title="Documenti" value="28" />
-</div>
-
-<div className="dashboardGrid">
-<div className="card">
-<div className="cardTitle">
-<div>
-<h2>Presenze di oggi</h2>
-<p>Situazione del personale</p>
-</div>
-
-<button
-className="linkButton"
-onClick={() => setActivePage("presenze")}
->
-Vedi tutte
-</button>
-</div>
-
-{employees.map((employee) => (
-<div className="miniEmployee" key={employee.id}>
-<div className="employeeName">
-<div className="avatar">
-{employee.name.charAt(employee.name.length - 1)}
-</div>
-
-<div>
-<strong>{employee.name}</strong>
-<small>{employee.role}</small>
-</div>
-</div>
-
-<b className="status">
-<i></i>
-Presente
-</b>
-</div>
-))}
-</div>
-
-<div className="card">
-<div className="cardTitle">
-<div>
-<h2>Azioni rapide</h2>
-<p>Gestisci il personale</p>
-</div>
-</div>
-
-<div className="quickActions">
-<button onClick={() => setActivePage("dipendenti")}>
-<span>♙</span>
-Dipendenti
-</button>
-
-<button onClick={() => setActivePage("presenze")}>
-<span>◷</span>
-Presenze
-</button>
-
-<button onClick={() => setActivePage("ferie")}>
-<span>☀</span>
-Ferie e permessi
-</button>
-
-<button onClick={() => setActivePage("buste")}>
-<span>▤</span>
-Buste paga
-</button>
-</div>
-</div>
-</div>
-
-<div className="card">
-<div className="cardTitle">
-<div>
-<h2>Attività recenti</h2>
-<p>Ultime attività del portale</p>
-</div>
-</div>
-
-<div className="activity">
-<span className="activityDot"></span>
-<div>
-<strong>Nuova richiesta ferie</strong>
-<small>Dipendente 1 · oggi alle 09:15</small>
-</div>
-</div>
-
-<div className="activity">
-<span className="activityDot"></span>
-<div>
-<strong>Presenza registrata</strong>
-<small>Dipendente 2 · oggi alle 08:02</small>
-</div>
-</div>
-
-<div className="activity">
-<span className="activityDot"></span>
-<div>
-<strong>Nuovo documento caricato</strong>
-<small>Dipendente 3 · ieri alle 16:42</small>
-</div>
-</div>
-</div>
-</section>
-);
+if (!documentError) {
+setDocuments(documentData || []);
 }
 }
 
+async function handleLogin(e: React.FormEvent) {
+e.preventDefault();
+
+setMessage("");
+
+const { error } = await supabase.auth.signInWithPassword({
+email,
+password,
+});
+
+if (error) {
+setMessage("Email o password non corretti.");
+return;
+}
+
+setMessage("");
+}
+
+async function handleRegister(e: React.FormEvent) {
+e.preventDefault();
+
+setMessage("");
+
+const { error } = await supabase.auth.signUp({
+email,
+password,
+});
+
+if (error) {
+setMessage(error.message);
+return;
+}
+
+setMessage(
+"Registrazione effettuata. Controlla la tua email per confermare l'account."
+);
+}
+
+async function logout() {
+await supabase.auth.signOut();
+}
+
+async function createEmployee(e: React.FormEvent) {
+e.preventDefault();
+
+setMessage("");
+
+const { error } = await supabase.rpc("create_employee", {
+p_full_name: newEmployee.full_name,
+p_email: newEmployee.email,
+p_tax_code: newEmployee.tax_code || null,
+p_phone: newEmployee.phone || null,
+p_employee_code: newEmployee.employee_code || null,
+p_hire_date: newEmployee.hire_date || null,
+p_notes: newEmployee.notes || null,
+});
+
+if (error) {
+setMessage(error.message);
+return;
+}
+
+setMessage("Dipendente inserito correttamente.");
+
+setNewEmployee({
+full_name: "",
+email: "",
+tax_code: "",
+phone: "",
+employee_code: "",
+hire_date: "",
+notes: "",
+});
+
+setShowEmployeeForm(false);
+
+await loadData();
+}
+
+function selectEmployee(employee: Employee) {
+setSelectedEmployee(employee);
+}
+
+function getEmployeeDocuments(employeeId: string) {
+return documents.filter((doc) => doc.employee_id === employeeId);
+}
+
+if (loading) {
 return (
-<>
-<style jsx global>{`
-* {
-box-sizing: border-box;
-}
+<main className="loading">
+<div className="loader"></div>
+<p>Caricamento BARDOC SERVICE...</p>
 
-body {
-margin: 0;
-font-family: Arial, Helvetica, sans-serif;
-background: #f4f7f6;
-color: #182522;
-}
-
-button,
-input,
-select {
-font-family: inherit;
-}
-
-button {
-cursor: pointer;
-}
-
-.app {
+<style jsx>{`
+.loading {
 min-height: 100vh;
-display: flex;
-}
-
-.sidebar {
-width: 250px;
-min-height: 100vh;
-background: #111918;
-color: white;
-padding: 24px 16px;
-position: fixed;
-left: 0;
-top: 0;
-bottom: 0;
-z-index: 10;
-}
-
-.brand {
-display: flex;
-align-items: center;
-gap: 10px;
-padding: 0 10px 28px;
-}
-
-.brandLogo {
-width: 38px;
-height: 38px;
-border-radius: 11px;
-background: #32e0a0;
-color: #10201b;
-display: flex;
-align-items: center;
-justify-content: center;
-font-size: 23px;
-font-weight: 900;
-}
-
-.brand strong {
-font-size: 18px;
-letter-spacing: .4px;
-}
-
-.brand small {
-display: block;
-color: #9baaa5;
-margin-top: 3px;
-font-size: 10px;
-}
-
-.nav {
 display: flex;
 flex-direction: column;
-gap: 5px;
-}
-
-.navButton {
-width: 100%;
-border: 0;
-background: transparent;
-color: #aebbb7;
-padding: 12px 13px;
-border-radius: 10px;
-text-align: left;
-display: flex;
 align-items: center;
-gap: 12px;
-font-size: 14px;
-}
-
-.navButton:hover,
-.navButton.active {
-background: #20302c;
-color: #42e3a6;
-}
-
-.navIcon {
-width: 20px;
-text-align: center;
-font-size: 17px;
-}
-
-.sidebarBottom {
-position: absolute;
-left: 16px;
-right: 16px;
-bottom: 20px;
-border-top: 1px solid #293532;
-padding-top: 15px;
-}
-
-.userBox {
-display: flex;
-align-items: center;
-gap: 10px;
-padding: 10px;
-}
-
-.userAvatar {
-width: 36px;
-height: 36px;
-background: #32e0a0;
-color: #10201b;
-border-radius: 50%;
-display: flex;
 justify-content: center;
-align-items: center;
-font-weight: 800;
-}
-
-.userBox strong {
-font-size: 13px;
-}
-
-.userBox small {
-display: block;
-color: #889691;
-margin-top: 2px;
-}
-
-.main {
-margin-left: 250px;
-width: calc(100% - 250px);
-min-height: 100vh;
-}
-
-.topbar {
-height: 72px;
-background: white;
-border-bottom: 1px solid #e4ebe8;
-display: flex;
-justify-content: space-between;
-align-items: center;
-padding: 0 35px;
-position: sticky;
-top: 0;
-z-index: 5;
-}
-
-.topTitle {
-font-size: 14px;
-color: #71807b;
-}
-
-.topRight {
-display: flex;
-align-items: center;
-gap: 18px;
-}
-
-.notification {
-position: relative;
-font-size: 21px;
-}
-
-.badge {
-position: absolute;
-top: -5px;
-right: -7px;
-width: 16px;
-height: 16px;
-background: #ff625d;
+background: #071512;
 color: white;
+font-family: Arial, sans-serif;
+}
+
+.loader {
+width: 42px;
+height: 42px;
+border: 4px solid #263b36;
+border-top-color: #35e0a0;
 border-radius: 50%;
-font-size: 9px;
+animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+to {
+transform: rotate(360deg);
+}
+}
+`}</style>
+</main>
+);
+}
+
+if (!session) {
+return (
+<main className="loginPage">
+<div className="loginCard">
+<div className="logo">B</div>
+
+<h1>BARDOC SERVICE</h1>
+<h2>Portale Dipendenti</h2>
+
+<p className="subtitle">
+Gestione del personale e documenti aziendali
+</p>
+
+<form onSubmit={loginMode ? handleLogin : handleRegister}>
+<label>Email</label>
+
+<input
+type="email"
+placeholder="nome@bardocservice.com"
+value={email}
+onChange={(e) => setEmail(e.target.value)}
+required
+/>
+
+<label>Password</label>
+
+<input
+type="password"
+placeholder="Password"
+value={password}
+onChange={(e) => setPassword(e.target.value)}
+required
+minLength={6}
+/>
+
+{message && <div className="message">{message}</div>}
+
+<button type="submit">
+{loginMode ? "Accedi al portale" : "Crea account"}
+</button>
+</form>
+
+<button
+className="switchButton"
+onClick={() => {
+setLoginMode(!loginMode);
+setMessage("");
+}}
+>
+{loginMode
+? "Devi creare un account?"
+: "Hai già un account? Accedi"}
+</button>
+
+<div className="loginFooter">
+BARDOC SERVICE
+<br />
+Un posto, mille servizi.
+</div>
+</div>
+
+<style jsx>{`
+.loginPage {
+min-height: 100vh;
+background: linear-gradient(135deg, #06110e, #102923);
 display: flex;
+align-items: center;
 justify-content: center;
-align-items: center;
+padding: 20px;
+font-family: Arial, sans-serif;
 }
 
-.content {
-padding: 35px;
-max-width: 1450px;
-margin: auto;
+.loginCard {
+width: 100%;
+max-width: 430px;
+background: #ffffff;
+border-radius: 24px;
+padding: 38px;
+box-shadow: 0 25px 70px rgba(0, 0, 0, 0.35);
 }
 
-.pageHeader {
+.logo {
+width: 60px;
+height: 60px;
+border-radius: 50%;
+background: #20c997;
+color: white;
 display: flex;
-justify-content: space-between;
 align-items: center;
-margin-bottom: 27px;
+justify-content: center;
+font-size: 32px;
+font-weight: 800;
+margin-bottom: 20px;
 }
 
 h1 {
 margin: 0;
-font-size: 31px;
-letter-spacing: -1px;
+color: #101b18;
+font-size: 27px;
 }
 
 h2 {
-margin: 0;
-font-size: 18px;
+margin: 8px 0;
+color: #20a879;
+font-size: 22px;
 }
 
-.pageHeader p,
-.cardTitle p {
-color: #7a8984;
-margin: 7px 0 0;
-font-size: 14px;
+.subtitle {
+color: #68746f;
+margin-bottom: 30px;
 }
 
-.primaryButton {
-border: 0;
-background: #31dca0;
-color: #10201b;
-font-weight: 800;
-padding: 12px 18px;
-border-radius: 9px;
-}
-
-.primaryButton:hover {
-background: #24c98e;
-}
-
-.welcome {
-background: linear-gradient(120deg, #10211d, #1d3830);
-border-radius: 18px;
-color: white;
-padding: 34px 38px;
-display: flex;
-justify-content: space-between;
-align-items: center;
-margin-bottom: 25px;
-}
-
-.welcome h1 {
-font-size: 35px;
-margin-top: 3px;
-}
-
-.welcome p:not(.eyebrow) {
-color: #c4d4ce;
-}
-
-.eyebrow {
-color: #42e3a6;
-font-weight: 800;
-font-size: 12px;
-letter-spacing: 1px;
-margin: 0 0 5px;
-}
-
-.welcomeLogo {
-width: 90px;
-height: 90px;
-border-radius: 25px;
-background: #32e0a0;
-color: #10201b;
-display: flex;
-align-items: center;
-justify-content: center;
-font-size: 55px;
-font-weight: 900;
-}
-
-.stats {
-display: grid;
-grid-template-columns: repeat(4, 1fr);
-gap: 17px;
-margin-bottom: 23px;
-}
-
-.stat {
-background: white;
-border: 1px solid #e5ebe9;
-border-radius: 13px;
-padding: 20px;
-}
-
-.statLabel {
-color: #75837f;
-font-size: 13px;
-}
-
-.statValue {
-font-size: 29px;
-font-weight: 800;
-margin-top: 9px;
-}
-
-.dashboardGrid {
-display: grid;
-grid-template-columns: 1.4fr 1fr;
-gap: 22px;
-margin-bottom: 22px;
-}
-
-.card {
-background: white;
-border: 1px solid #e3eae7;
-border-radius: 14px;
-padding: 23px;
-margin-bottom: 22px;
-overflow: hidden;
-}
-
-.cardTitle {
-display: flex;
-justify-content: space-between;
-align-items: center;
-margin-bottom: 20px;
-}
-
-.linkButton {
-border: 0;
-background: transparent;
-color: #13ad79;
+label {
+display: block;
+margin: 16px 0 7px;
 font-weight: 700;
+color: #24332e;
 }
 
-.miniEmployee,
-.presenceRow,
-.payroll,
-.request,
-.message,
-.activity {
-display: flex;
-align-items: center;
-justify-content: space-between;
-padding: 14px 0;
-border-bottom: 1px solid #edf1ef;
-}
-
-.miniEmployee:last-child,
-.presenceRow:last-child,
-.payroll:last-child,
-.request:last-child,
-.message:last-child,
-.activity:last-child {
-border-bottom: 0;
-}
-
-.employeeName {
-display: flex;
-align-items: center;
-gap: 11px;
-}
-
-.avatar {
-width: 38px;
-height: 38px;
-background: #d9f8ed;
-color: #087b58;
+input {
+width: 100%;
+box-sizing: border-box;
+padding: 14px;
+border: 1px solid #d8dfdc;
 border-radius: 10px;
-display: flex;
-align-items: center;
-justify-content: center;
-font-weight: 800;
-}
-
-.employeeName strong,
-.request strong,
-.payroll strong,
-.message strong {
-display: block;
-font-size: 14px;
-}
-
-.employeeName small,
-.request small,
-.payroll small,
-.message small,
-.activity small {
-display: block;
-color: #87948f;
-margin-top: 4px;
-font-size: 12px;
-}
-
-.status {
-color: #15966d;
-font-size: 12px;
-display: flex;
-align-items: center;
-gap: 6px;
-}
-
-.status i {
-display: block;
-width: 7px;
-height: 7px;
-background: #27d394;
-border-radius: 50%;
-}
-
-.quickActions {
-display: grid;
-grid-template-columns: 1fr 1fr;
-gap: 11px;
-}
-
-.quickActions button {
-border: 1px solid #e2e9e6;
-background: #f8faf9;
-border-radius: 11px;
-padding: 17px 10px;
-color: #24322f;
-text-align: left;
-font-weight: 700;
-}
-
-.quickActions button:hover {
-border-color: #32dca0;
-background: #f0fff9;
-}
-
-.quickActions span {
-color: #0eae79;
-font-size: 20px;
-display: block;
-margin-bottom: 7px;
-}
-
-.activity {
-justify-content: flex-start;
-gap: 12px;
-}
-
-.activityDot {
-width: 9px;
-height: 9px;
-border-radius: 50%;
-background: #31dca0;
-}
-
-.searchRow {
-display: flex;
-gap: 12px;
-margin-bottom: 20px;
-}
-
-.search,
-.select {
-border: 1px solid #dce5e1;
-border-radius: 9px;
-padding: 12px 14px;
-outline: none;
-background: white;
-}
-
-.search {
-width: 100%;
-max-width: 450px;
-}
-
-.select {
-min-width: 150px;
-}
-
-.table {
-width: 100%;
-overflow-x: auto;
-}
-
-.tableHeader,
-.tableRow {
-min-width: 850px;
-display: grid;
-grid-template-columns: 2fr 1.5fr 2fr 1fr .7fr;
-gap: 15px;
-align-items: center;
-}
-
-.tableHeader {
-color: #84918d;
-font-size: 11px;
-text-transform: uppercase;
-padding: 13px 0;
-border-bottom: 1px solid #e7ecea;
-}
-
-.tableRow {
-padding: 15px 0;
-border-bottom: 1px solid #edf1ef;
-font-size: 13px;
-}
-
-.detailsButton {
-border: 1px solid #d5e2dd;
-background: white;
-color: #178a67;
-padding: 8px 12px;
-border-radius: 7px;
-font-weight: 700;
-}
-
-.detailsButton:hover {
-background: #effbf7;
-}
-
-.presenceRow {
-gap: 20px;
-font-size: 13px;
-}
-
-.waiting {
-color: #b67800;
-background: #fff6dd;
-padding: 6px 10px;
-border-radius: 20px;
-font-size: 11px;
-font-weight: 700;
-}
-
-.requestButtons {
-display: flex;
-gap: 7px;
-}
-
-.approve,
-.reject {
-border: 0;
-padding: 8px 11px;
-border-radius: 7px;
-font-size: 12px;
-font-weight: 700;
-}
-
-.approve {
-background: #dff8ed;
-color: #087b58;
-}
-
-.reject {
-background: #ffebeb;
-color: #b33d3d;
-}
-
-.payroll span {
-background: #e9f0ff;
-color: #3c65b7;
-padding: 5px 9px;
-border-radius: 5px;
-font-size: 10px;
-font-weight: 800;
-}
-
-.documentGrid {
-display: grid;
-grid-template-columns: repeat(3, 1fr);
-gap: 18px;
-}
-
-.document {
-background: white;
-border: 1px solid #e2e9e6;
-border-radius: 14px;
-padding: 24px;
-transition: .2s;
-}
-
-.document:hover {
-transform: translateY(-2px);
-border-color: #32dca0;
-}
-
-.documentIcon {
-width: 45px;
-height: 45px;
-background: #dff8ed;
-color: #0b956a;
-border-radius: 11px;
-display: flex;
-align-items: center;
-justify-content: center;
-font-size: 20px;
-margin-bottom: 15px;
-}
-
-.document strong {
 font-size: 15px;
+outline: none;
 }
 
-.document small {
-display: block;
-color: #84918d;
-margin-top: 6px;
+input:focus {
+border-color: #20c997;
 }
 
-.calendar {
-max-width: 900px;
-}
-
-.calendarTop {
-display: flex;
-align-items: center;
-justify-content: space-between;
-margin-bottom: 25px;
-}
-
-.calendarTop button {
-border: 1px solid #dfe8e4;
-background: white;
-border-radius: 7px;
-width: 35px;
-height: 35px;
-}
-
-.week,
-.days {
-display: grid;
-grid-template-columns: repeat(7, 1fr);
-gap: 7px;
-}
-
-.week {
-color: #899690;
-font-size: 11px;
-text-align: center;
-margin-bottom: 7px;
-}
-
-.days div {
-min-height: 75px;
-padding: 10px;
-border: 1px solid #edf1ef;
-border-radius: 8px;
-font-size: 13px;
-}
-
-.days .today {
-background: #dff8ed;
-border-color: #31dca0;
+button {
+width: 100%;
+margin-top: 22px;
+border: 0;
+border-radius: 10px;
+padding: 14px;
+background: #20c997;
+color: white;
 font-weight: 800;
+font-size: 16px;
+cursor: pointer;
+}
+
+button:hover {
+opacity: 0.9;
+}
+
+.switchButton {
+background: transparent;
+color: #15966f;
+margin-top: 10px;
 }
 
 .message {
-justify-content: flex-start;
-gap: 15px;
+margin-top: 15px;
+padding: 12px;
+background: #eefaf5;
+color: #147b5b;
+border-radius: 9px;
+font-size: 14px;
 }
 
-.messageIcon {
-width: 42px;
-height: 42px;
-border-radius: 10px;
-background: #e0f8ee;
-color: #0b966a;
-display: flex;
-align-items: center;
-justify-content: center;
-font-weight: 800;
-}
-
-@media (max-width: 1000px) {
-.sidebar {
-width: 210px;
-}
-
-.main {
-margin-left: 210px;
-width: calc(100% - 210px);
-}
-
-.stats {
-grid-template-columns: repeat(2, 1fr);
-}
-
-.dashboardGrid {
-grid-template-columns: 1fr;
-}
-
-.documentGrid {
-grid-template-columns: repeat(2, 1fr);
-}
-}
-
-@media (max-width: 700px) {
-.sidebar {
-width: 70px;
-padding: 15px 8px;
-}
-
-.brand strong,
-.brand small,
-.navButton span:not(.navIcon),
-.sidebarBottom {
-display: none;
-}
-
-.brand {
-justify-content: center;
-padding: 0 0 20px;
-}
-
-.navButton {
-justify-content: center;
-padding: 13px;
-}
-
-.main {
-margin-left: 70px;
-width: calc(100% - 70px);
-}
-
-.content {
-padding: 20px;
-}
-
-.topbar {
-padding: 0 20px;
-}
-
-.pageHeader {
-align-items: flex-start;
-gap: 15px;
-flex-direction: column;
-}
-
-.stats {
-grid-template-columns: 1fr 1fr;
-}
-
-.documentGrid {
-grid-template-columns: 1fr;
-}
-
-.welcomeLogo {
-display: none;
-}
+.loginFooter {
+text-align: center;
+margin-top: 30px;
+color: #89938f;
+font-size: 12px;
+line-height: 1.6;
 }
 `}</style>
+</main>
+);
+}
 
-<div className="app">
-<aside className="sidebar">
+const activeEmployees = employees.filter((employee) => employee.active);
+
+return (
+<main className="dashboard">
+<header className="header">
+<div>
 <div className="brand">
-<div className="brandLogo">B</div>
-<div>
-<strong>BARDOC SERVICE</strong>
-<small>PORTALE DIPENDENTI</small>
-</div>
+<span className="brandLogo">B</span>
+<span>BARDOC SERVICE</span>
 </div>
 
-<nav className="nav">
-{menuItems.map((item) => (
-<button
-key={item.id}
-className={`navButton ${
-activePage === item.id ? "active" : ""
-}`}
-onClick={() => setActivePage(item.id)}
->
-<span className="navIcon">{item.icon}</span>
-<span>{item.label}</span>
+<p>Portale gestione personale</p>
+</div>
+
+<button className="logout" onClick={logout}>
+Esci
 </button>
-))}
-</nav>
-
-<div className="sidebarBottom">
-<div className="userBox">
-<div className="userAvatar">A</div>
-<div>
-<strong>Amministratore</strong>
-<small>BARDOC SERVICE</small>
-</div>
-</div>
-</div>
-</aside>
-
-<main className="main">
-<header className="topbar">
-<div className="topTitle">
-BARDOC SERVICE / Portale del personale
-</div>
-
-<div className="topRight">
-<div className="notification">
-♧
-<span className="badge">2</span>
-</div>
-
-<div className="userAvatar">A</div>
-</div>
 </header>
 
-<div className="content">{renderContent()}</div>
-</main>
-
-{selectedEmployee && (
-<div
-style={{
-position: "fixed",
-inset: 0,
-background: "rgba(0,0,0,.45)",
-zIndex: 50,
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-padding: 20,
-}}
-onClick={() => setSelectedEmployee(null)}
->
-<div
-style={{
-background: "white",
-width: "100%",
-maxWidth: 500,
-borderRadius: 18,
-padding: 30,
-}}
-onClick={(e) => e.stopPropagation()}
->
-<div
-style={{
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-marginBottom: 25,
-}}
->
-<h2>Scheda dipendente</h2>
+<section className="welcome">
+<div>
+<h1>Dashboard</h1>
+<p>Benvenuto nel Portale Dipendenti BARDOC SERVICE.</p>
+</div>
 
 <button
-onClick={() => setSelectedEmployee(null)}
-style={{
-border: 0,
-background: "#f0f3f2",
-borderRadius: 8,
-width: 35,
-height: 35,
-}}
+className="addButton"
+onClick={() => setShowEmployeeForm(true)}
+>
++ Nuovo dipendente
+</button>
+</section>
+
+{message && <div className="success">{message}</div>}
+
+<section className="stats">
+<div className="stat">
+<span>Dipendenti</span>
+<strong>{employees.length}</strong>
+</div>
+
+<div className="stat">
+<span>Attivi</span>
+<strong>{activeEmployees.length}</strong>
+</div>
+
+<div className="stat">
+<span>Documenti</span>
+<strong>{documents.length}</strong>
+</div>
+</section>
+
+{showEmployeeForm && (
+<section className="panel">
+<div className="panelHeader">
+<h2>Nuovo dipendente</h2>
+
+<button
+className="close"
+onClick={() => setShowEmployeeForm(false)}
 >
 ×
 </button>
 </div>
 
-<div
-style={{
-display: "flex",
-alignItems: "center",
-gap: 15,
-marginBottom: 25,
-}}
+<form className="employeeForm" onSubmit={createEmployee}>
+<input
+placeholder="Nome e cognome *"
+value={newEmployee.full_name}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+full_name: e.target.value,
+})
+}
+required
+/>
+
+<input
+type="email"
+placeholder="Email *"
+value={newEmployee.email}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+email: e.target.value,
+})
+}
+required
+/>
+
+<input
+placeholder="Codice fiscale"
+value={newEmployee.tax_code}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+tax_code: e.target.value,
+})
+}
+/>
+
+<input
+placeholder="Telefono"
+value={newEmployee.phone}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+phone: e.target.value,
+})
+}
+/>
+
+<input
+placeholder="Codice dipendente"
+value={newEmployee.employee_code}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+employee_code: e.target.value,
+})
+}
+/>
+
+<input
+type="date"
+value={newEmployee.hire_date}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+hire_date: e.target.value,
+})
+}
+/>
+
+<textarea
+placeholder="Note"
+value={newEmployee.notes}
+onChange={(e) =>
+setNewEmployee({
+...newEmployee,
+notes: e.target.value,
+})
+}
+/>
+
+<button type="submit">Salva dipendente</button>
+</form>
+</section>
+)}
+
+<section className="content">
+<div className="employees">
+<div className="sectionTitle">
+<h2>Dipendenti</h2>
+<span>{employees.length} totali</span>
+</div>
+
+{employees.length === 0 ? (
+<div className="empty">
+Nessun dipendente presente.
+</div>
+) : (
+<div className="employeeList">
+{employees.map((employee) => (
+<button
+key={employee.id}
+className="employee"
+onClick={() => selectEmployee(employee)}
 >
-<div className="avatar" style={{ width: 55, height: 55 }}>
-{selectedEmployee.name.charAt(
-selectedEmployee.name.length - 1
+<div className="avatar">
+{employee.full_name.charAt(0).toUpperCase()}
+</div>
+
+<div className="employeeInfo">
+<strong>{employee.full_name}</strong>
+<span>
+{employee.employee_code || "Codice non assegnato"}
+</span>
+<small>{employee.email}</small>
+</div>
+
+<span
+className={
+employee.active ? "activeBadge" : "inactiveBadge"
+}
+>
+{employee.active ? "Attivo" : "Non attivo"}
+</span>
+</button>
+))}
+</div>
 )}
 </div>
 
+<aside className="details">
+{!selectedEmployee ? (
+<div className="emptyDetails">
+<div className="bigIcon">👤</div>
+<h3>Seleziona un dipendente</h3>
+<p>
+Seleziona un dipendente per visualizzare anagrafica e
+documenti.
+</p>
+</div>
+) : (
+<>
+<div className="profileHeader">
+<div className="bigAvatar">
+{selectedEmployee.full_name.charAt(0).toUpperCase()}
+</div>
+
 <div>
-<strong>{selectedEmployee.name}</strong>
-<small>{selectedEmployee.role}</small>
+<h2>{selectedEmployee.full_name}</h2>
+<span>
+{selectedEmployee.active ? "Dipendente attivo" : "Non attivo"}
+</span>
 </div>
 </div>
 
-<div
-style={{
-display: "grid",
-gap: 15,
-fontSize: 14,
-}}
+<div className="infoGrid">
+<div>
+<label>Email</label>
+<p>{selectedEmployee.email || "—"}</p>
+</div>
+
+<div>
+<label>Telefono</label>
+<p>{selectedEmployee.phone || "—"}</p>
+</div>
+
+<div>
+<label>Codice fiscale</label>
+<p>{selectedEmployee.tax_code || "—"}</p>
+</div>
+
+<div>
+<label>Codice dipendente</label>
+<p>{selectedEmployee.employee_code || "—"}</p>
+</div>
+
+<div>
+<label>Data assunzione</label>
+<p>{selectedEmployee.hire_date || "—"}</p>
+</div>
+</div>
+
+<div className="documents">
+<h3>Documenti e buste paga</h3>
+
+{getEmployeeDocuments(selectedEmployee.id).length === 0 ? (
+<div className="emptyDocument">
+Nessun documento presente.
+</div>
+) : (
+getEmployeeDocuments(selectedEmployee.id).map((doc) => (
+<div className="document" key={doc.id}>
+<div className="documentIcon">📄</div>
+
+<div>
+<strong>{doc.file_name}</strong>
+<span>
+{doc.document_type}
+{doc.month && doc.year
+? ` — ${doc.month}/${doc.year}`
+: ""}
+</span>
+</div>
+
+<button
+className="viewButton"
+onClick={() =>
+window.open(doc.storage_path, "_blank")
+}
 >
-<div>
-<small style={{ color: "#83908c" }}>Reparto</small>
-<div>{selectedEmployee.department}</div>
+Apri
+</button>
 </div>
-
-<div>
-<small style={{ color: "#83908c" }}>Email</small>
-<div>{selectedEmployee.email}</div>
-</div>
-
-<div>
-<small style={{ color: "#83908c" }}>Telefono</small>
-<div>{selectedEmployee.phone || "Non inserito"}</div>
-</div>
-
-<div>
-<small style={{ color: "#83908c" }}>Stato</small>
-<div className="status">
-<i></i>
-{selectedEmployee.status}
-</div>
-</div>
-</div>
-</div>
-</div>
+))
 )}
 </div>
 </>
-);
+)}
+</aside>
+</section>
+
+<footer>
+<strong>BARDOC SERVICE</strong>
+<span>Un posto, mille servizi.</span>
+</footer>
+
+<style jsx>{`
+.dashboard {
+min-height: 100vh;
+background: #f4f7f5;
+color: #17231f;
+font-family: Arial, sans-serif;
 }
 
-function Stat({ title, value }: { title: string; value: string }) {
-return (
-<div className="stat">
-<div className="statLabel">{title}</div>
-<div className="statValue">{value}</div>
-</div>
-);
+.header {
+background: #071512;
+color: white;
+padding: 22px 6%;
+display: flex;
+justify-content: space-between;
+align-items: center;
 }
 
-function Document({ title, icon }: { title: string; icon: string }) {
-return (
-<div className="document">
-<div className="documentIcon">{icon}</div>
-<strong>{title}</strong>
-<small>Gestisci i documenti</small>
-</div>
+.brand {
+display: flex;
+align-items: center;
+gap: 10px;
+font-size: 20px;
+font-weight: 900;
+}
+
+.brandLogo {
+width: 38px;
+height: 38px;
+border-radius: 50%;
+background: #20c997;
+display: flex;
+justify-content: center;
+align-items: center;
+}
+
+.header p {
+margin: 5px 0 0 48px;
+color: #a8bbb5;
+font-size: 13px;
+}
+
+.logout {
+border: 1px solid #4d625b;
+background: transparent;
+color: white;
+padding: 10px 18px;
+border-radius: 9px;
+cursor: pointer;
+}
+
+.welcome {
+padding: 40px 6% 25px;
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+
+.welcome h1 {
+margin: 0;
+font-size: 34px;
+}
+
+.welcome p {
+color: #697873;
+}
+
+.addButton {
+background: #20c997;
+color: white;
+border: 0;
+padding: 14px 20px;
+border-radius: 10px;
+font-weight: 800;
+cursor: pointer;
+}
+
+.success {
+margin: 0 6% 20px;
+padding: 13px;
+background: #e6f8f1;
+color: #167c5b;
+border-radius: 10px;
+}
+
+.stats {
+padding: 0 6% 25px;
+display: grid;
+grid-template-columns: repeat(3, 1fr);
+gap: 18px;
+}
+
+.stat {
+background: white;
+border-radius: 16px;
+padding: 22px;
+box-shadow: 0 5px 20px rgba(0, 0, 0, 0.05);
+}
+
+.stat span {
+display: block;
+color: #73817c;
+font-size: 14px;
+}
+
+.stat strong {
+display: block;
+margin-top: 8px;
+font-size: 30px;
+color: #159b72;
+}
+
+.panel {
+margin: 0 6% 25px;
+background: white;
+padding: 25px;
+border-radius: 16px;
+}
+
+.panelHeader {
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+
+.close {
+width: 35px;
+height: 35px;
+border: 0;
+border-radius: 50%;
+background: #edf2ef;
+cursor: pointer;
+font-size: 20px;
+}
+
+.employeeForm {
+display: grid;
+grid-template-columns: repeat(2, 1fr);
+gap: 14px;
+margin-top: 20px;
+}
+
+.employeeForm input,
+.employeeForm textarea {
+box-sizing: border-box;
+width: 100%;
+padding: 13px;
+border: 1px solid #d9e1dd;
+border-radius: 9px;
+font-size: 14px;
+}
+
+.employeeForm textarea {
+min-height: 90px;
+grid-column: span 2;
+}
+
+.employeeForm button {
+background: #20c997;
+color: white;
+border: 0;
+border-radius: 9px;
+padding: 13px;
+font-weight: 800;
+cursor: pointer;
+}
+
+.content {
+padding: 0 6% 40px;
+display: grid;
+grid-template-columns: 1fr 1.25fr;
+gap: 25px;
+}
+
+.employees,
+.details {
+background: white;
+border-radius: 18px;
+padding: 25px;
+box-shadow: 0 5px 20px rgba(0, 0, 0, 0.04);
+}
+
+.sectionTitle {
+display: flex;
+justify-content: space-between;
+align-items: center;
+}
+
+.sectionTitle span {
+color: #87948f;
+font-size: 13px;
+}
+
+.employeeList {
+display: flex;
+flex-direction: column;
+gap: 8px;
+margin-top: 15px;
+}
+
+.employee {
+width: 100%;
+border: 1px solid #edf0ef;
+background: white;
+padding: 13px;
+border-radius: 12px;
+display: flex;
+align-items: center;
+text-align: left;
+cursor: pointer;
+}
+
+.employee:hover {
+border-color: #20c997;
+background: #f8fcfa;
+}
+
+.avatar,
+.bigAvatar {
+flex-shrink: 0;
+background: #dff8ee;
+color: #159b72;
+font-weight: 900;
+display: flex;
+align-items: center;
+justify-content: center;
+border-radius: 50%;
+}
+
+.avatar {
+width: 42px;
+height: 42px;
+}
+
+.employeeInfo {
+margin-left: 12px;
+flex: 1;
+}
+
+.employeeInfo strong,
+.employeeInfo span,
+.employeeInfo small {
+display: block;
+}
+
+.employeeInfo span {
+color: #159b72;
+font-size: 12px;
+margin-top: 3px;
+}
+
+.employeeInfo small {
+color: #89938f;
+margin-top: 3px;
+}
+
+.activeBadge,
+.inactiveBadge {
+font-size: 11px;
+padding: 5px 8px;
+border-radius: 20px;
+}
+
+.activeBadge {
+background: #e1f8ef;
+color: #13865f;
+}
+
+.inactiveBadge {
+background: #eee;
+color: #777;
+}
+
+.profileHeader {
+display: flex;
+align-items: center;
+gap: 15px;
+padding-bottom: 20px;
+border-bottom: 1px solid #edf0ef;
+}
+
+.bigAvatar {
+width: 58px;
+height: 58px;
+font-size: 23px;
+}
+
+.profileHeader h2 {
+margin: 0 0 5px;
+}
+
+.profileHeader span {
+color: #159b72;
+font-size: 13px;
+}
+
+.infoGrid {
+display: grid;
+grid-template-columns: 1fr 1fr;
+gap: 20px;
+padding: 20px 0;
+}
+
+.infoGrid label {
+color: #89938f;
+font-size: 12px;
+}
+
+.infoGrid p {
+margin: 5px 0 0;
+font-weight: 700;
+font-size: 14px;
+}
+
+.documents {
+border-top: 1px solid #edf0ef;
+padding-top: 20px;
+}
+
+.document {
+display: flex;
+align-items: center;
+gap: 12px;
+padding: 12px;
+border: 1px solid #edf0ef;
+border-radius: 10px;
+margin-top: 8px;
+}
+
+.documentIcon {
+font-size: 24px;
+}
+
+.document > div:nth-child(2) {
+flex: 1;
+}
+
+.document strong,
+.document span {
+display: block;
+}
+
+.document span {
+font-size: 12px;
+color: #7b8782;
+margin-top: 4px;
+}
+
+.viewButton {
+width: auto;
+margin: 0;
+padding: 8px 12px;
+background: #e5f8f1;
+color: #11855f;
+border: 0;
+border-radius: 7px;
+font-weight: 700;
+cursor: pointer;
+}
+
+.empty,
+.emptyDocument,
+.emptyDetails {
+color: #84918c;
+text-align: center;
+padding: 35px 15px;
+}
+
+.bigIcon {
+font-size: 40px;
+}
+
+footer {
+background: #071512;
+color: white;
+padding: 25px 6%;
+display: flex;
+justify-content: space-between;
+}
+
+footer span {
+color: #8ea39b;
+}
+
+@media (max-width: 850px) {
+.stats,
+.content,
+.employeeForm {
+grid-template-columns: 1fr;
+}
+
+.employeeForm textarea {
+grid-column: span 1;
+}
+
+.welcome {
+flex-direction: column;
+align-items: flex-start;
+gap: 20px;
+}
+
+.addButton {
+width: 100%;
+}
+
+.infoGrid {
+grid-template-columns: 1fr;
+}
+}
+`}</style>
+</main>
 );
 }
