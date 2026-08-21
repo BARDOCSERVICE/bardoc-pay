@@ -1,5 +1,7 @@
 "use client";
 
+
+
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -34,18 +36,18 @@ created_at: string;
 };
 
 export default function Home() {
-const [session, setSession] = useState<any>(null);
+const [session, setSession] = useState\<any>(null);
 const [loading, setLoading] = useState(true);
 const [loginMode, setLoginMode] = useState(true);
 
 const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
 
-const [employees, setEmployees] = useState<Employee[]>([]);
-const [documents, setDocuments] = useState<Document[]>([]);
+const [employees, setEmployees] = useState\<Employee[]>([]);
+const [documents, setDocuments] = useState\<Document[]>([]);
 
 const [selectedEmployee, setSelectedEmployee] =
-useState<Employee | null>(null);
+useState\<Employee | null>(null);
 
 const [showEmployeeForm, setShowEmployeeForm] = useState(false);
 const [message, setMessage] = useState("");
@@ -95,11 +97,62 @@ setLoading(false);
 
 async function loadData() {
 const {
-data: employeeData,
-error: employeeError,
-} = await supabase
+data: { user },
+} = await supabase.auth.getUser();
+
+if (!user) return;
+
+const { data: profile } = await supabase
+.from("profiles")
+.select("role")
+.eq("id", user.id)
+.single();
+
+const role = profile?.role === "admin" ? "admin" : "employee";
+setUserRole(role);
+
+if (role === "admin") {
+const { data: employeeData } = await supabase
 .from("employees")
 .select("*")
+.order("full_name", { ascending: true });
+
+const { data: documentData } = await supabase
+.from("documents")
+.select("*")
+.order("created_at", { ascending: false });
+
+setEmployees(employeeData || []);
+setDocuments(documentData || []);
+return;
+}
+
+const { data: employee } = await supabase
+.from("employees")
+.select("*")
+.eq("auth_user_id", user.id)
+.single();
+
+if (!employee) {
+setEmployees([]);
+setDocuments([]);
+setSelectedEmployee(null);
+return;
+}
+
+setEmployees([employee]);
+setSelectedEmployee(employee);
+
+const { data: documentData } = await supabase
+.from("documents")
+.select("*")
+.eq("employee_id", employee.id)
+.order("created_at", { ascending: false });
+
+setDocuments(documentData || []);
+} = await supabase
+.from("employees")
+.select("\*")
 .order("full_name", { ascending: true });
 
 if (!employeeError) {
@@ -111,7 +164,7 @@ data: documentData,
 error: documentError,
 } = await supabase
 .from("documents")
-.select("*")
+.select("\*")
 .order("created_at", { ascending: false });
 
 if (!documentError) {
@@ -199,7 +252,9 @@ await loadData();
 }
 
 function selectEmployee(employee: Employee) {
+if (userRole === "admin") {
 setSelectedEmployee(employee);
+}
 }
 
 function getEmployeeDocuments(employeeId: string) {
@@ -208,11 +263,11 @@ return documents.filter((doc) => doc.employee_id === employeeId);
 
 if (loading) {
 return (
-<main className="loading">
-<div className="loader"></div>
-<p>Caricamento BARDOC SERVICE...</p>
+\<main className="loading">
+\<div className="loader">\</div>
+\<p>Caricamento BARDOC SERVICE...\</p>
 
-<style jsx>{`
+\<style jsx>{`
 .loading {
 min-height: 100vh;
 display: flex;
@@ -238,38 +293,38 @@ to {
 transform: rotate(360deg);
 }
 }
-`}</style>
-</main>
+`}\</style>
+\</main>
 );
 }
 
 if (!session) {
 return (
-<main className="loginPage">
-<div className="loginCard">
-<div className="logo">B</div>
+\<main className="loginPage">
+\<div className="loginCard">
+\<div className="logo">B\</div>
 
-<h1>BARDOC SERVICE</h1>
-<h2>Portale Dipendenti</h2>
+\<h1>BARDOC SERVICE\</h1>
+\<h2>Portale Dipendenti\</h2>
 
-<p className="subtitle">
+\<p className="subtitle">
 Gestione del personale e documenti aziendali
-</p>
+\</p>
 
-<form onSubmit={loginMode ? handleLogin : handleRegister}>
-<label>Email</label>
+\<form onSubmit={loginMode ? handleLogin : handleRegister}>
+\<label>Email\</label>
 
-<input
+\<input
 type="email"
-placeholder="nome@bardocservice.com"
+placeholder="[nome@bardocservice.com](mailto:nome@bardocservice.com)"
 value={email}
 onChange={(e) => setEmail(e.target.value)}
 required
 />
 
-<label>Password</label>
+\<label>Password\</label>
 
-<input
+\<input
 type="password"
 placeholder="Password"
 value={password}
@@ -278,33 +333,33 @@ required
 minLength={6}
 />
 
-{message && <div className="message">{message}</div>}
+{message && \<div className="message">{message}\</div>}
 
-<button type="submit">
+\<button type="submit">
 {loginMode ? "Accedi al portale" : "Crea account"}
-</button>
-</form>
+\</button>
+\</form>
 
-<button
+\<button
 className="switchButton"
 onClick={() => {
 setLoginMode(!loginMode);
 setMessage("");
 }}
->
+\>
 {loginMode
 ? "Devi creare un account?"
 : "Hai già un account? Accedi"}
-</button>
+\</button>
 
-<div className="loginFooter">
+\<div className="loginFooter">
 BARDOC SERVICE
-<br />
+\<br />
 Un posto, mille servizi.
-</div>
-</div>
+\</div>
+\</div>
 
-<style jsx>{`
+\<style jsx>{`
 .loginPage {
 min-height: 100vh;
 background: linear-gradient(135deg, #06110e, #102923);
@@ -415,79 +470,79 @@ color: #89938f;
 font-size: 12px;
 line-height: 1.6;
 }
-`}</style>
-</main>
+`}\</style>
+\</main>
 );
 }
 
 const activeEmployees = employees.filter((employee) => employee.active);
 
 return (
-<main className="dashboard">
-<header className="header">
-<div>
-<div className="brand">
-<span className="brandLogo">B</span>
-<span>BARDOC SERVICE</span>
-</div>
+\<main className="dashboard">
+\<header className="header">
+\<div>
+\<div className="brand">
+\<span className="brandLogo">B\</span>
+\<span>BARDOC SERVICE\</span>
+\</div>
 
-<p>Portale gestione personale</p>
-</div>
+\<p>Portale gestione personale\</p>
+\</div>
 
-<button className="logout" onClick={logout}>
+\<button className="logout" onClick={logout}>
 Esci
-</button>
-</header>
+\</button>
+\</header>
 
-<section className="welcome">
-<div>
-<h1>Dashboard</h1>
-<p>Benvenuto nel Portale Dipendenti BARDOC SERVICE.</p>
-</div>
+\<section className="welcome">
+\<div>
+\<h1>Dashboard\</h1>
+\<p>Benvenuto nel Portale Dipendenti BARDOC SERVICE.\</p>
+\</div>
 
-<button
+\<button
 className="addButton"
 onClick={() => setShowEmployeeForm(true)}
->
-+ Nuovo dipendente
-</button>
-</section>
+\>
+\+ Nuovo dipendente
+\</button>
+\</section>
 
-{message && <div className="success">{message}</div>}
+{message && \<div className="success">{message}\</div>}
 
-<section className="stats">
-<div className="stat">
-<span>Dipendenti</span>
-<strong>{employees.length}</strong>
-</div>
+\<section className="stats">
+\<div className="stat">
+\<span>Dipendenti\</span>
+\<strong>{employees.length}\</strong>
+\</div>
 
-<div className="stat">
-<span>Attivi</span>
-<strong>{activeEmployees.length}</strong>
-</div>
+\<div className="stat">
+\<span>Attivi\</span>
+\<strong>{activeEmployees.length}\</strong>
+\</div>
 
-<div className="stat">
-<span>Documenti</span>
-<strong>{documents.length}</strong>
-</div>
-</section>
+\<div className="stat">
+\<span>Documenti\</span>
+\<strong>{documents.length}\</strong>
+\</div>
+\</section>
 
 {showEmployeeForm && (
-<section className="panel">
-<div className="panelHeader">
-<h2>Nuovo dipendente</h2>
+\<section className="panel">
+\<div className="panelHeader">
+\<h2>Nuovo dipendente\</h2>
 
-<button
+\<button
 className="close"
 onClick={() => setShowEmployeeForm(false)}
->
+\>
 ×
-</button>
-</div>
+\</button>
+\</div>
 
-<form className="employeeForm" onSubmit={createEmployee}>
-<input
-placeholder="Nome e cognome *"
+\<form className="employeeForm" onSubmit={createEmployee}>
+\<input
+placeholder="Nome e cognome \*"
 value={newEmployee.full_name}
 onChange={(e) =>
 setNewEmployee({
@@ -498,9 +553,9 @@ full_name: e.target.value,
 required
 />
 
-<input
+\<input
 type="email"
-placeholder="Email *"
+placeholder="Email \*"
 value={newEmployee.email}
 onChange={(e) =>
 setNewEmployee({
@@ -511,7 +566,7 @@ email: e.target.value,
 required
 />
 
-<input
+\<input
 placeholder="Codice fiscale"
 value={newEmployee.tax_code}
 onChange={(e) =>
@@ -522,7 +577,7 @@ tax_code: e.target.value,
 }
 />
 
-<input
+\<input
 placeholder="Telefono"
 value={newEmployee.phone}
 onChange={(e) =>
@@ -533,7 +588,7 @@ phone: e.target.value,
 }
 />
 
-<input
+\<input
 placeholder="Codice dipendente"
 value={newEmployee.employee_code}
 onChange={(e) =>
@@ -544,7 +599,7 @@ employee_code: e.target.value,
 }
 />
 
-<input
+\<input
 type="date"
 value={newEmployee.hire_date}
 onChange={(e) =>
@@ -555,7 +610,7 @@ hire_date: e.target.value,
 }
 />
 
-<textarea
+\<textarea
 placeholder="Note"
 value={newEmployee.notes}
 onChange={(e) =>
@@ -566,152 +621,152 @@ notes: e.target.value,
 }
 />
 
-<button type="submit">Salva dipendente</button>
-</form>
-</section>
+\<button type="submit">Salva dipendente\</button>
+\</form>
+\</section>
 )}
 
-<section className="content">
-<div className="employees">
-<div className="sectionTitle">
-<h2>Dipendenti</h2>
-<span>{employees.length} totali</span>
-</div>
+\<section className="content">
+\<div className="employees">
+\<div className="sectionTitle">
+\<h2>Dipendenti\</h2>
+\<span>{employees.length} totali\</span>
+\</div>
 
 {employees.length === 0 ? (
-<div className="empty">
+\<div className="empty">
 Nessun dipendente presente.
-</div>
+\</div>
 ) : (
-<div className="employeeList">
+\<div className="employeeList">
 {employees.map((employee) => (
-<button
-key={employee.id}
+\<button
+key={[employee.id](http://employee.id/)}
 className="employee"
 onClick={() => selectEmployee(employee)}
->
-<div className="avatar">
+\>
+\<div className="avatar">
 {employee.full_name.charAt(0).toUpperCase()}
-</div>
+\</div>
 
-<div className="employeeInfo">
-<strong>{employee.full_name}</strong>
-<span>
+\<div className="employeeInfo">
+\<strong>{employee.full_name}\</strong>
+\<span>
 {employee.employee_code || "Codice non assegnato"}
-</span>
-<small>{employee.email}</small>
-</div>
+\</span>
+\<small>{employee.email}\</small>
+\</div>
 
-<span
+\<span
 className={
 employee.active ? "activeBadge" : "inactiveBadge"
 }
->
+\>
 {employee.active ? "Attivo" : "Non attivo"}
-</span>
-</button>
+\</span>
+\</button>
 ))}
-</div>
+\</div>
 )}
-</div>
+\</div>
 
-<aside className="details">
+\<aside className="details">
 {!selectedEmployee ? (
-<div className="emptyDetails">
-<div className="bigIcon">👤</div>
-<h3>Seleziona un dipendente</h3>
-<p>
+\<div className="emptyDetails">
+\<div className="bigIcon">\</div>
+\<h3>Seleziona un dipendente\</h3>
+\<p>
 Seleziona un dipendente per visualizzare anagrafica e
 documenti.
-</p>
-</div>
+\</p>
+\</div>
 ) : (
 <>
-<div className="profileHeader">
-<div className="bigAvatar">
+\<div className="profileHeader">
+\<div className="bigAvatar">
 {selectedEmployee.full_name.charAt(0).toUpperCase()}
-</div>
+\</div>
 
-<div>
-<h2>{selectedEmployee.full_name}</h2>
-<span>
+\<div>
+\<h2>{selectedEmployee.full_name}\</h2>
+\<span>
 {selectedEmployee.active ? "Dipendente attivo" : "Non attivo"}
-</span>
-</div>
-</div>
+\</span>
+\</div>
+\</div>
 
-<div className="infoGrid">
-<div>
-<label>Email</label>
-<p>{selectedEmployee.email || "—"}</p>
-</div>
+\<div className="infoGrid">
+\<div>
+\<label>Email\</label>
+\<p>{selectedEmployee.email || "—"}\</p>
+\</div>
 
-<div>
-<label>Telefono</label>
-<p>{selectedEmployee.phone || "—"}</p>
-</div>
+\<div>
+\<label>Telefono\</label>
+\<p>{selectedEmployee.phone || "—"}\</p>
+\</div>
 
-<div>
-<label>Codice fiscale</label>
-<p>{selectedEmployee.tax_code || "—"}</p>
-</div>
+\<div>
+\<label>Codice fiscale\</label>
+\<p>{selectedEmployee.tax_code || "—"}\</p>
+\</div>
 
-<div>
-<label>Codice dipendente</label>
-<p>{selectedEmployee.employee_code || "—"}</p>
-</div>
+\<div>
+\<label>Codice dipendente\</label>
+\<p>{selectedEmployee.employee_code || "—"}\</p>
+\</div>
 
-<div>
-<label>Data assunzione</label>
-<p>{selectedEmployee.hire_date || "—"}</p>
-</div>
-</div>
+\<div>
+\<label>Data assunzione\</label>
+\<p>{selectedEmployee.hire_date || "—"}\</p>
+\</div>
+\</div>
 
-<div className="documents">
-<h3>Documenti e buste paga</h3>
+\<div className="documents">
+\<h3>Documenti e buste paga\</h3>
 
 {getEmployeeDocuments(selectedEmployee.id).length === 0 ? (
-<div className="emptyDocument">
+\<div className="emptyDocument">
 Nessun documento presente.
-</div>
+\</div>
 ) : (
 getEmployeeDocuments(selectedEmployee.id).map((doc) => (
-<div className="document" key={doc.id}>
-<div className="documentIcon">📄</div>
+\<div className="document" key={[doc.id](http://doc.id/)}>
+\<div className="documentIcon">\</div>
 
-<div>
-<strong>{doc.file_name}</strong>
-<span>
+\<div>
+\<strong>{doc.file_name}\</strong>
+\<span>
 {doc.document_type}
 {doc.month && doc.year
 ? ` — ${doc.month}/${doc.year}`
 : ""}
-</span>
-</div>
+\</span>
+\</div>
 
-<button
+\<button
 className="viewButton"
 onClick={() =>
 window.open(doc.storage_path, "_blank")
 }
->
+\>
 Apri
-</button>
-</div>
+\</button>
+\</div>
 ))
 )}
-</div>
-</>
+\</div>
+\</>
 )}
-</aside>
-</section>
+\</aside>
+\</section>
 
-<footer>
-<strong>BARDOC SERVICE</strong>
-<span>Un posto, mille servizi.</span>
-</footer>
+\<footer>
+\<strong>BARDOC SERVICE\</strong>
+\<span>Un posto, mille servizi.\</span>
+\</footer>
 
-<style jsx>{`
+\<style jsx>{`
 .dashboard {
 min-height: 100vh;
 background: #f4f7f5;
@@ -1119,7 +1174,7 @@ width: 100%;
 grid-template-columns: 1fr;
 }
 }
-`}</style>
-</main>
+`}\</style>
+\</main>
 );
 }
