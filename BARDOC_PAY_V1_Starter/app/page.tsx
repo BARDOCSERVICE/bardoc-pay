@@ -5,10 +5,9 @@ import { supabase } from "../lib/supabase";
 
 type Employee = {
 id: string;
+auth_user_id: string | null;
 full_name: string;
-tax_code: string | null;
 email: string | null;
-phone: string | null;
 active: boolean;
 };
 
@@ -20,12 +19,9 @@ month: number;
 year: number;
 file_name: string;
 storage_path: string;
-created_at: string;
 };
 
-type DocumentWithUrl = Document & {
-signedUrl?: string;
-};
+const ADMIN_EMAIL = "bardocfg@gmail.com";
 
 export default function Home() {
 const [session, setSession] = useState<any>(null);
@@ -33,131 +29,50 @@ const [loading, setLoading] = useState(true);
 
 const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
-
 const [loginMode, setLoginMode] = useState(true);
 const [message, setMessage] = useState("");
 const [submitting, setSubmitting] = useState(false);
 
 const [employee, setEmployee] = useState<Employee | null>(null);
-const [documents, setDocuments] = useState<DocumentWithUrl[]>([]);
-const [documentsLoading, setDocumentsLoading] = useState(false);
+const [employees, setEmployees] = useState<Employee[]>([]);
+const [documents, setDocuments] = useState<Document[]>([]);
+
+const [adminLoading, setAdminLoading] = useState(false);
+
+const [selectedEmployee, setSelectedEmployee] = useState("");
+const [documentType, setDocumentType] = useState("payslip");
+const [month, setMonth] = useState(new Date().getMonth() + 1);
+const [year, setYear] = useState(new Date().getFullYear());
+const [file, setFile] = useState<File | null>(null);
+
+const isAdmin =
+session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
 useEffect(() => {
-loadSession();
+supabase.auth.getSession().then(({ data }) => {
+setSession(data.session);
+setLoading(false);
+});
 
 const {
 data: { subscription },
 } = supabase.auth.onAuthStateChange((_event, newSession) => {
 setSession(newSession);
-
-if (newSession) {
-loadEmployeeAndDocuments(newSession.user.id);
-} else {
-setEmployee(null);
-setDocuments([]);
-}
-
 setLoading(false);
 });
 
 return () => subscription.unsubscribe();
 }, []);
 
-async function loadSession() {
-const { data } = await supabase.auth.getSession();
+useEffect(() => {
+if (!session) return;
 
-setSession(data.session);
-setLoading(false);
-
-if (data.session) {
-await loadEmployeeAndDocuments(data.session.user.id);
-}
-}
-
-async function loadEmployeeAndDocuments(authUserId: string) {
-setDocumentsLoading(true);
-setMessage("");
-
-try {
-/*
-* CERCA IL DIPENDENTE COLLEGATO
-* auth_user_id = utente Supabase autenticato
-*/
-const { data: employeeData, error: employeeError } =
-await supabase
-.from("employees")
-.select("id, full_name, tax_code, email, phone, active")
-.eq("auth_user_id", authUserId)
-.maybeSingle();
-
-if (employeeError) {
-console.error(employeeError);
-setMessage("Errore nel caricamento del profilo.");
-return;
-}
-
-if (!employeeData) {
-setEmployee(null);
-setDocuments([]);
-setMessage(
-"Il tuo account non è ancora associato a un dipendente."
-);
-return;
-}
-
-setEmployee(employeeData);
-
-/*
-* RECUPERA I DOCUMENTI DEL DIPENDENTE
-*/
-const { data: documentsData, error: documentsError } =
-await supabase
-.from("documents")
-.select(
-"id, employee_id, document_type, month, year, file_name, storage_path, created_at"
-)
-.eq("employee_id", employeeData.id)
-.order("year", { ascending: false })
-.order("month", { ascending: false });
-
-if (documentsError) {
-console.error(documentsError);
-setMessage("Errore nel caricamento dei documenti.");
-return;
-}
-
-/*
-* CREA URL TEMPORANEI PER I PDF PRIVATI
-*/
-const documentsWithUrls: DocumentWithUrl[] = [];
-
-for (const document of documentsData || []) {
-const { data: signedData, error: signedError } =
-await supabase.storage
-.from("payroll-documents")
-.createSignedUrl(document.storage_path, 60 * 10);
-
-if (signedError) {
-console.error(
-"Errore URL documento:",
-document.file_name,
-signedError
-);
-
-documentsWithUrls.push(document);
+if (isAdmin) {
+loadEmployees();
 } else {
-documentsWithUrls.push({
-...document,
-signedUrl: signedData?.signedUrl,
-});
+loadEmployeeArea();
 }
-}
-
-setDocuments(documentsWithUrls);
-} finally {
-setDocumentsLoading(false);
-}
-}
+}, [session, isAdmin]);
 
 async function handleSubmit(e: React.FormEvent) {
 e.preventDefault();
@@ -198,43 +113,163 @@ await supabase.auth.signOut();
 setSession(null);
 setEmployee(null);
 setDocuments([]);
+setEmployees([]);
 setEmail("");
 setPassword("");
 }
 
-function getMonthName(month: number) {
-const months = [
-"Gennaio",
-"Febbraio",
-"Marzo",
-"Aprile",
-"Maggio",
-"Giugno",
-"Luglio",
-"Agosto",
-"Settembre",
-"Ottobre",
-"Novembre",
-"Dicembre",
-];
+async function loadEmployeeArea() {
+if (!session?.user?.id) return;
 
-return months[month - 1] || `Mese ${month}`;
+const { data: emp, error: empError } = await supabase
+.from("employees")
+.select("*")
+.eq("auth_user_id", session.user.id)
+.maybeSingle();
+
+if (empError) {
+console.error(empError);
+return;
 }
 
-function getDocumentLabel(type: string) {
-switch (type) {
-case "payslip":
+setEmployee(emp);
+
+if (!emp) return;
+
+const { data: docs, error: docsError } = await supabase
+.from("documents")
+.select("*")
+.eq("employee_id", emp.id)
+.order("year", { ascending: false })
+.order("month", { ascending: false });
+
+if (docsError) {
+console.error(docsError);
+return;
+}
+
+setDocuments(docs || []);
+}
+
+async function loadEmployees() {
+setAdminLoading(true);
+
+const { data, error } = await supabase
+.from("employees")
+.select("*")
+.eq("active", true)
+.order("full_name");
+
+if (error) {
+console.error(error);
+setMessage("Impossibile caricare i dipendenti.");
+} else {
+setEmployees(data || []);
+}
+
+setAdminLoading(false);
+}
+
+async function uploadDocument() {
+setMessage("");
+
+if (!selectedEmployee) {
+setMessage("Seleziona un dipendente.");
+return;
+}
+
+if (!file) {
+setMessage("Seleziona un file PDF.");
+return;
+}
+
+if (file.type !== "application/pdf") {
+setMessage("Il documento deve essere un PDF.");
+return;
+}
+
+setSubmitting(true);
+
+try {
+const employeeFolder = selectedEmployee;
+
+const safeFileName = file.name
+.replace(/[^\w.\- ]/g, "")
+.replace(/\s+/g, "_");
+
+const storagePath = `${employeeFolder}/${safeFileName}`;
+
+const { error: uploadError } = await supabase.storage
+.from("payroll-documents")
+.upload(storagePath, file, {
+upsert: true,
+contentType: "application/pdf",
+});
+
+if (uploadError) {
+throw uploadError;
+}
+
+const { error: documentError } = await supabase
+.from("documents")
+.insert({
+employee_id: selectedEmployee,
+document_type: documentType,
+month,
+year,
+file_name: file.name,
+storage_path: storagePath,
+});
+
+if (documentError) {
+throw documentError;
+}
+
+setMessage("Documento caricato correttamente. ✅");
+
+setSelectedEmployee("");
+setDocumentType("payslip");
+setMonth(new Date().getMonth() + 1);
+setYear(new Date().getFullYear());
+setFile(null);
+
+const input = document.getElementById(
+"document-file"
+) as HTMLInputElement | null;
+
+if (input) input.value = "";
+} catch (error: any) {
+console.error(error);
+setMessage(
+error?.message || "Errore durante il caricamento del documento."
+);
+}
+
+setSubmitting(false);
+}
+
+async function openDocument(doc: Document) {
+const { data, error } = await supabase.storage
+.from("payroll-documents")
+.createSignedUrl(doc.storage_path, 300);
+
+if (error) {
+console.error(error);
+setMessage("Impossibile aprire il documento.");
+return;
+}
+
+if (data?.signedUrl) {
+window.open(data.signedUrl, "_blank");
+}
+}
+
+function documentLabel(type: string) {
+if (type === "payment_statement") {
+return "Distinta di pagamento";
+}
+
 return "Busta paga";
-
-case "contract":
-return "Contratto";
-
-case "document":
-return "Documento";
-
-default:
-return type;
-}
 }
 
 if (loading) {
@@ -317,7 +352,6 @@ alignItems: "center",
 justifyContent: "center",
 fontSize: 46,
 fontWeight: 900,
-boxShadow: "0 12px 30px rgba(22,199,132,0.30)",
 }}
 >
 B
@@ -341,7 +375,7 @@ color: "#13202b",
 fontSize: 30,
 }}
 >
-BARDOC PAY
+Portale Dipendenti
 </h1>
 
 <p
@@ -363,22 +397,9 @@ flexDirection: "column",
 gap: 16,
 }}
 >
-<div>
-<label
-style={{
-display: "block",
-marginBottom: 7,
-fontSize: 13,
-fontWeight: 700,
-color: "#26333d",
-}}
->
-Email
-</label>
-
 <input
 type="email"
-placeholder="Inserisci la tua email"
+placeholder="Email"
 value={email}
 onChange={(e) => setEmail(e.target.value)}
 required
@@ -389,27 +410,12 @@ padding: "14px 15px",
 borderRadius: 12,
 border: "1px solid #dce3e7",
 fontSize: 15,
-outline: "none",
 }}
 />
-</div>
-
-<div>
-<label
-style={{
-display: "block",
-marginBottom: 7,
-fontSize: 13,
-fontWeight: 700,
-color: "#26333d",
-}}
->
-Password
-</label>
 
 <input
 type="password"
-placeholder="Inserisci la password"
+placeholder="Password"
 value={password}
 onChange={(e) => setPassword(e.target.value)}
 required
@@ -420,16 +426,13 @@ padding: "14px 15px",
 borderRadius: 12,
 border: "1px solid #dce3e7",
 fontSize: 15,
-outline: "none",
 }}
 />
-</div>
 
 <button
 type="submit"
 disabled={submitting}
 style={{
-marginTop: 6,
 padding: "15px 18px",
 border: "none",
 borderRadius: 12,
@@ -437,8 +440,7 @@ background: "#16c784",
 color: "#062019",
 fontSize: 16,
 fontWeight: 800,
-cursor: submitting ? "wait" : "pointer",
-opacity: submitting ? 0.7 : 1,
+cursor: "pointer",
 }}
 >
 {submitting
@@ -464,7 +466,6 @@ background: "transparent",
 color: "#119e6a",
 fontWeight: 700,
 cursor: "pointer",
-fontSize: 14,
 }}
 >
 {loginMode
@@ -481,32 +482,289 @@ borderRadius: 12,
 background: "#f1f7f5",
 color: "#285d4b",
 textAlign: "center",
-fontSize: 14,
 }}
 >
 {message}
 </div>
 )}
-
-<div
-style={{
-marginTop: 30,
-paddingTop: 20,
-borderTop: "1px solid #edf0f2",
-textAlign: "center",
-color: "#9aa3a9",
-fontSize: 12,
-}}
->
-BARDOC PAY · Area riservata
-</div>
 </div>
 </main>
 );
 }
 
 /*
-* PORTALE DOPO IL LOGIN
+* AREA AMMINISTRATORE
+*/
+if (isAdmin) {
+return (
+<main
+style={{
+minHeight: "100vh",
+background: "#f3f6f5",
+fontFamily: "Arial, sans-serif",
+color: "#17232d",
+}}
+>
+<header
+style={{
+background: "#ffffff",
+borderBottom: "1px solid #e5e9e8",
+padding: "18px 28px",
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+}}
+>
+<div>
+<strong style={{ fontSize: 21 }}>BARDOC PAY</strong>
+<div style={{ color: "#89959b", fontSize: 13 }}>
+Area amministratore
+</div>
+</div>
+
+<button
+onClick={logout}
+style={{
+padding: "10px 17px",
+border: "1px solid #dce4e1",
+borderRadius: 10,
+background: "#fff",
+fontWeight: 700,
+cursor: "pointer",
+}}
+>
+Esci
+</button>
+</header>
+
+<section
+style={{
+maxWidth: 1000,
+margin: "0 auto",
+padding: 30,
+}}
+>
+<div
+style={{
+background: "linear-gradient(135deg,#07141f,#102d39)",
+borderRadius: 22,
+padding: 30,
+color: "#fff",
+marginBottom: 22,
+}}
+>
+<div
+style={{
+color: "#16c784",
+fontWeight: 800,
+fontSize: 13,
+}}
+>
+AMMINISTRAZIONE
+</div>
+
+<h1 style={{ margin: "8px 0" }}>
+Carica documento
+</h1>
+
+<p style={{ margin: 0, color: "#b8c5cb" }}>
+Pubblica buste paga e distinte di pagamento per i dipendenti.
+</p>
+</div>
+
+<div
+style={{
+background: "#fff",
+borderRadius: 20,
+padding: 28,
+border: "1px solid #e6ebea",
+}}
+>
+<div
+style={{
+display: "grid",
+gridTemplateColumns: "1fr 1fr",
+gap: 18,
+}}
+>
+<div>
+<label>Dipendente</label>
+
+<select
+value={selectedEmployee}
+onChange={(e) => setSelectedEmployee(e.target.value)}
+style={{
+width: "100%",
+padding: 14,
+marginTop: 7,
+borderRadius: 10,
+border: "1px solid #dce3e7",
+}}
+>
+<option value="">Seleziona dipendente</option>
+
+{employees.map((emp) => (
+<option key={emp.id} value={emp.id}>
+{emp.full_name}
+</option>
+))}
+</select>
+</div>
+
+<div>
+<label>Tipo documento</label>
+
+<select
+value={documentType}
+onChange={(e) => setDocumentType(e.target.value)}
+style={{
+width: "100%",
+padding: 14,
+marginTop: 7,
+borderRadius: 10,
+border: "1px solid #dce3e7",
+}}
+>
+<option value="payslip">Busta paga</option>
+<option value="payment_statement">
+Distinta di pagamento
+</option>
+</select>
+</div>
+
+<div>
+<label>Mese</label>
+
+<select
+value={month}
+onChange={(e) => setMonth(Number(e.target.value))}
+style={{
+width: "100%",
+padding: 14,
+marginTop: 7,
+borderRadius: 10,
+border: "1px solid #dce3e7",
+}}
+>
+{[
+"Gennaio",
+"Febbraio",
+"Marzo",
+"Aprile",
+"Maggio",
+"Giugno",
+"Luglio",
+"Agosto",
+"Settembre",
+"Ottobre",
+"Novembre",
+"Dicembre",
+].map((name, index) => (
+<option key={name} value={index + 1}>
+{name}
+</option>
+))}
+</select>
+</div>
+
+<div>
+<label>Anno</label>
+
+<input
+type="number"
+value={year}
+onChange={(e) => setYear(Number(e.target.value))}
+style={{
+width: "100%",
+padding: 14,
+marginTop: 7,
+borderRadius: 10,
+border: "1px solid #dce3e7",
+boxSizing: "border-box",
+}}
+/>
+</div>
+</div>
+
+<div style={{ marginTop: 20 }}>
+<label>Documento PDF</label>
+
+<input
+id="document-file"
+type="file"
+accept="application/pdf,.pdf"
+onChange={(e) =>
+setFile(e.target.files?.[0] || null)
+}
+style={{
+display: "block",
+marginTop: 10,
+width: "100%",
+}}
+/>
+</div>
+
+<button
+onClick={uploadDocument}
+disabled={submitting}
+style={{
+width: "100%",
+marginTop: 25,
+padding: 16,
+border: "none",
+borderRadius: 12,
+background: "#16c784",
+color: "#062019",
+fontWeight: 800,
+fontSize: 16,
+cursor: submitting ? "wait" : "pointer",
+}}
+>
+{submitting
+? "Caricamento..."
+: "CARICA DOCUMENTO"}
+</button>
+
+{message && (
+<div
+style={{
+marginTop: 18,
+padding: 14,
+borderRadius: 12,
+background: "#f1f7f5",
+color: "#285d4b",
+textAlign: "center",
+}}
+>
+{message}
+</div>
+)}
+</div>
+
+<div
+style={{
+marginTop: 20,
+padding: 20,
+background: "#fff",
+borderRadius: 16,
+border: "1px solid #e6ebea",
+}}
+>
+<strong>Dipendenti attivi</strong>
+
+<div style={{ marginTop: 12, color: "#74808a" }}>
+{adminLoading
+? "Caricamento..."
+: `${employees.length} dipendenti presenti`}
+</div>
+</div>
+</section>
+</main>
+);
+}
+
+/*
+* AREA DIPENDENTE
 */
 return (
 <main
@@ -519,58 +777,19 @@ color: "#17232d",
 >
 <header
 style={{
-height: 72,
-background: "#ffffff",
+background: "#fff",
+padding: "18px 28px",
 borderBottom: "1px solid #e5e9e8",
 display: "flex",
-alignItems: "center",
 justifyContent: "space-between",
-padding: "0 28px",
-}}
->
-<div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-<div
-style={{
-width: 44,
-height: 44,
-borderRadius: 13,
-background: "#16c784",
-display: "flex",
 alignItems: "center",
-justifyContent: "center",
-fontSize: 25,
-fontWeight: 900,
-color: "#062019",
 }}
 >
-B
-</div>
-
 <div>
-<div style={{ fontWeight: 800 }}>BARDOC SERVICE</div>
-<div style={{ fontSize: 12, color: "#8a949b" }}>
-BARDOC PAY
+<strong style={{ fontSize: 21 }}>BARDOC PAY</strong>
+<div style={{ color: "#89959b", fontSize: 13 }}>
+Area personale
 </div>
-</div>
-</div>
-
-<div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-<div
-style={{
-width: 38,
-height: 38,
-borderRadius: "50%",
-background: "#dff8ee",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-fontWeight: 800,
-color: "#119e6a",
-}}
->
-{(employee?.full_name || session.user.email || "U")
-.charAt(0)
-.toUpperCase()}
 </div>
 
 <button
@@ -579,488 +798,114 @@ style={{
 padding: "10px 17px",
 border: "1px solid #dce4e1",
 borderRadius: 10,
-background: "#ffffff",
-color: "#26333d",
+background: "#fff",
 fontWeight: 700,
-cursor: "pointer",
 }}
 >
 Esci
 </button>
-</div>
 </header>
-
-<div
-style={{
-display: "flex",
-minHeight: "calc(100vh - 72px)",
-}}
->
-<aside
-style={{
-width: 235,
-background: "#07141f",
-color: "#ffffff",
-padding: "26px 16px",
-boxSizing: "border-box",
-}}
->
-<div
-style={{
-padding: "12px 14px",
-borderRadius: 12,
-background: "rgba(22,199,132,0.12)",
-color: "#16c784",
-fontWeight: 800,
-marginBottom: 20,
-}}
->
-▣ Dashboard
-</div>
-
-<div
-style={{
-padding: "13px 14px",
-color: "#ffffff",
-fontSize: 14,
-marginBottom: 3,
-borderRadius: 10,
-background: "rgba(255,255,255,0.05)",
-}}
->
-▤ Le mie buste paga
-</div>
-
-<div
-style={{
-padding: "13px 14px",
-color: "#aebbc2",
-fontSize: 14,
-marginBottom: 3,
-borderRadius: 10,
-}}
->
-✦ Ferie e permessi
-</div>
-
-<div
-style={{
-padding: "13px 14px",
-color: "#aebbc2",
-fontSize: 14,
-marginBottom: 3,
-borderRadius: 10,
-}}
->
-◷ Presenze
-</div>
-
-<div
-style={{
-padding: "13px 14px",
-color: "#aebbc2",
-fontSize: 14,
-marginBottom: 3,
-borderRadius: 10,
-}}
->
-✉ Comunicazioni
-</div>
-
-<div
-style={{
-marginTop: 35,
-padding: 14,
-borderRadius: 12,
-background: "rgba(255,255,255,0.04)",
-color: "#8e9ba3",
-fontSize: 12,
-}}
->
-<strong style={{ color: "#16c784" }}>●</strong>{" "}
-Accesso autorizzato
-</div>
-</aside>
 
 <section
 style={{
-flex: 1,
-padding: 30,
-boxSizing: "border-box",
-maxWidth: 1400,
+maxWidth: 1100,
 margin: "0 auto",
-width: "100%",
+padding: 30,
 }}
 >
 <div
 style={{
-background:
-"linear-gradient(135deg, #07141f 0%, #102d39 100%)",
+background: "linear-gradient(135deg,#07141f,#102d39)",
 borderRadius: 22,
-padding: "32px 34px",
-color: "#ffffff",
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-marginBottom: 24,
+padding: 30,
+color: "#fff",
 }}
 >
-<div>
 <div
 style={{
 color: "#16c784",
 fontWeight: 800,
 fontSize: 13,
-letterSpacing: 1,
 }}
 >
 AREA PERSONALE
 </div>
 
-<h1 style={{ margin: "8px 0", fontSize: 32 }}>
+<h1 style={{ margin: "8px 0" }}>
 {employee?.full_name || "Dipendente"}
 </h1>
 
-<p
-style={{
-margin: 0,
-color: "#b8c5cb",
-}}
->
+<p style={{ margin: 0, color: "#b8c5cb" }}>
 Benvenuto nel tuo portale BARDOC PAY.
 </p>
 </div>
 
 <div
 style={{
-width: 72,
-height: 72,
-borderRadius: 20,
-background: "#16c784",
-color: "#062019",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-fontSize: 40,
-fontWeight: 900,
-}}
->
-B
-</div>
-</div>
-
-{!employee ? (
-<div
-style={{
-background: "#ffffff",
-borderRadius: 20,
-padding: 30,
-border: "1px solid #e6ebea",
-}}
->
-<h2 style={{ marginTop: 0 }}>
-Account non associato
-</h2>
-
-<p style={{ color: "#74808a" }}>
-L'account{" "}
-<strong>{session.user.email}</strong>{" "}
-è autenticato, ma non è ancora collegato a un dipendente.
-</p>
-
-<p style={{ color: "#74808a" }}>
-Contatta l'amministratore per completare l'associazione.
-</p>
-</div>
-) : (
-<>
-<div
-style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(auto-fit, minmax(200px, 1fr))",
-gap: 16,
-marginBottom: 24,
-}}
->
-<div
-style={{
-background: "#ffffff",
-borderRadius: 17,
-padding: 22,
-border: "1px solid #e6ebea",
-}}
->
-<div
-style={{
-color: "#89959b",
-fontSize: 13,
-marginBottom: 12,
-}}
->
-Documenti disponibili
-</div>
-
-<div
-style={{
-fontSize: 30,
-fontWeight: 800,
-}}
->
-{documents.length}
-</div>
-</div>
-
-<div
-style={{
-background: "#ffffff",
-borderRadius: 17,
-padding: 22,
-border: "1px solid #e6ebea",
-}}
->
-<div
-style={{
-color: "#89959b",
-fontSize: 13,
-marginBottom: 12,
-}}
->
-Email
-</div>
-
-<div
-style={{
-fontSize: 16,
-fontWeight: 700,
-wordBreak: "break-word",
-}}
->
-{employee.email || session.user.email}
-</div>
-</div>
-
-<div
-style={{
-background: "#ffffff",
-borderRadius: 17,
-padding: 22,
-border: "1px solid #e6ebea",
-}}
->
-<div
-style={{
-color: "#89959b",
-fontSize: 13,
-marginBottom: 12,
-}}
->
-Stato account
-</div>
-
-<div
-style={{
-fontSize: 16,
-fontWeight: 800,
-color: "#119e6a",
-}}
->
-● Attivo
-</div>
-</div>
-</div>
-
-<div
-style={{
-background: "#ffffff",
+background: "#fff",
 borderRadius: 20,
 padding: 25,
-border: "1px solid #e6ebea",
+marginTop: 20,
 }}
 >
-<div
-style={{
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-marginBottom: 22,
-}}
->
-<div>
-<h2
-style={{
-margin: 0,
-fontSize: 21,
-}}
->
-I miei documenti
-</h2>
+<h2 style={{ marginTop: 0 }}>I miei documenti</h2>
 
-<p
-style={{
-margin: "6px 0 0",
-color: "#89959b",
-fontSize: 13,
-}}
->
-Buste paga e documenti personali
+{documents.length === 0 ? (
+<p style={{ color: "#89959b" }}>
+Non sono presenti documenti.
 </p>
-</div>
-</div>
-
-{documentsLoading ? (
-<div
-style={{
-padding: 40,
-textAlign: "center",
-color: "#89959b",
-}}
->
-Caricamento documenti...
-</div>
-) : documents.length === 0 ? (
-<div
-style={{
-padding: 40,
-textAlign: "center",
-background: "#f5f8f7",
-borderRadius: 14,
-color: "#89959b",
-}}
->
-<div
-style={{
-fontSize: 35,
-marginBottom: 10,
-}}
->
-📄
-</div>
-
-Nessun documento disponibile.
-</div>
 ) : (
+documents.map((doc) => (
 <div
+key={doc.id}
 style={{
 display: "flex",
-flexDirection: "column",
-gap: 10,
-}}
->
-{documents.map((document) => (
-<div
-key={document.id}
-style={{
-display: "flex",
-alignItems: "center",
 justifyContent: "space-between",
-gap: 15,
+alignItems: "center",
 padding: 16,
-borderRadius: 14,
-background: "#f7f9f8",
-border: "1px solid #e8edeb",
+borderTop: "1px solid #edf0ef",
 }}
 >
-<div
-style={{
-display: "flex",
-alignItems: "center",
-gap: 14,
-}}
->
-<div
-style={{
-width: 46,
-height: 46,
-borderRadius: 12,
-background: "#e1f8ef",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-fontSize: 22,
-}}
->
-📄
-</div>
-
 <div>
-<div
-style={{
-fontWeight: 800,
-color: "#26333d",
-}}
->
-{getDocumentLabel(
-document.document_type
-)}
-</div>
+<strong>
+{documentLabel(doc.document_type)}
+</strong>
 
 <div
 style={{
-fontSize: 13,
 color: "#89959b",
-marginTop: 4,
-}}
->
-{getMonthName(document.month)}{" "}
-{document.year}
-</div>
-
-<div
-style={{
-fontSize: 12,
-color: "#a1aaaf",
-marginTop: 3,
-}}
->
-{document.file_name}
-</div>
-</div>
-</div>
-
-{document.signedUrl ? (
-<a
-href={document.signedUrl}
-target="_blank"
-rel="noopener noreferrer"
-style={{
-padding: "10px 15px",
-borderRadius: 10,
-background: "#16c784",
-color: "#062019",
-textDecoration: "none",
-fontWeight: 800,
 fontSize: 13,
-whiteSpace: "nowrap",
+marginTop: 5,
+}}
+>
+{doc.file_name} · {doc.month}/{doc.year}
+</div>
+</div>
+
+<button
+onClick={() => openDocument(doc)}
+style={{
+background: "#16c784",
+border: "none",
+borderRadius: 10,
+padding: "10px 16px",
+fontWeight: 800,
+cursor: "pointer",
 }}
 >
 Apri PDF
-</a>
-) : (
-<span
-style={{
-color: "#a33",
-fontSize: 12,
-}}
->
-Non disponibile
-</span>
+</button>
+</div>
+))
 )}
 </div>
-))}
-</div>
-)}
-</div>
-</>
-)}
 
 <div
 style={{
-marginTop: 22,
+marginTop: 20,
 padding: 18,
-background: "#ffffff",
+background: "#fff",
 borderRadius: 16,
-border: "1px solid #e6ebea",
 color: "#7d898f",
 fontSize: 13,
 }}
@@ -1071,7 +916,6 @@ Accesso effettuato come{" "}
 </strong>
 </div>
 </section>
-</div>
 </main>
 );
 }
