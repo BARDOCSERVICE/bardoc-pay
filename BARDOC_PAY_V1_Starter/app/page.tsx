@@ -9,24 +9,26 @@ auth_user_id: string | null;
 full_name: string;
 email: string | null;
 active: boolean;
-fiscal_code: string | null;
-photo_path: string | null;
+fiscal_code?: string | null;
+photo_path?: string | null;
 };
 
 type Document = {
 id: string;
 employee_id: string;
+document_category?: string | null;
 document_type: string;
-month: number;
+month?: number | null;
 year: number;
 file_name: string;
 storage_path: string;
-expiry_date?: string | null;
+expiration_date?: string | null;
+fiscal_code?: string | null;
 };
 
 const ADMIN_EMAIL = "bardocfg@gmail.com";
 
-const MONTHS = [
+const months = [
 "Gennaio",
 "Febbraio",
 "Marzo",
@@ -41,62 +43,82 @@ const MONTHS = [
 "Dicembre",
 ];
 
-const DOCUMENT_TYPES = [
-{
-value: "identity_document",
-label: "Documento di identità",
-category: "personal",
-expiry: true,
-},
-{
-value: "driving_license",
-label: "Patente",
-category: "personal",
-expiry: true,
-},
-{
-value: "fiscal_code",
-label: "Codice fiscale",
-category: "personal",
-expiry: false,
-},
-{
-value: "employment_contract",
-label: "Contratto di lavoro",
-category: "employment",
-expiry: false,
-},
-{
-value: "work_relationship",
-label: "Rapporto di lavoro",
-category: "employment",
-expiry: false,
-},
-{
-value: "leave_absence",
-label: "Permessi e assenze",
-category: "employment",
-expiry: false,
-},
-{
-value: "payslip",
-label: "Busta paga",
-category: "payroll",
-expiry: false,
-},
-{
-value: "payment_statement",
-label: "Distinta di pagamento",
-category: "payroll",
-expiry: false,
-},
-{
-value: "curriculum",
-label: "Curriculum",
-category: "personal",
-expiry: false,
-},
+const documentCategories = [
+{ value: "retribuzione", label: "💰 Retribuzione" },
+{ value: "rapporto_lavoro", label: "📄 Rapporto di lavoro" },
+{ value: "permessi_assenze", label: "📝 Permessi e assenze" },
+{ value: "documenti_personali", label: "🪪 Documenti personali" },
+{ value: "curriculum", label: "📁 Curriculum" },
 ];
+
+const documentTypes: Record<string, { value: string; label: string }[]> = {
+retribuzione: [
+{ value: "payslip", label: "Busta paga" },
+{ value: "payment_statement", label: "Distinta di pagamento" },
+],
+rapporto_lavoro: [
+{ value: "employment_contract", label: "Contratto di lavoro" },
+{ value: "employment_document", label: "Documento rapporto di lavoro" },
+],
+permessi_assenze: [
+{ value: "leave_request", label: "Foglio permesso" },
+{ value: "absence_document", label: "Documento assenza" },
+],
+documenti_personali: [
+{ value: "identity_card", label: "Documento d'identità" },
+{ value: "driving_license", label: "Patente" },
+],
+curriculum: [
+{ value: "cv", label: "Curriculum Vitae" },
+{ value: "historical_cv", label: "CV storico" },
+],
+};
+
+function categoryLabel(value?: string | null) {
+return (
+documentCategories.find((item) => item.value === value)?.label ||
+"Documento"
+);
+}
+
+function documentLabel(value: string) {
+for (const category of Object.values(documentTypes)) {
+const found = category.find((item) => item.value === value);
+if (found) return found.label;
+}
+
+return value;
+}
+
+function requiresExpiration(type: string) {
+return (
+type === "identity_card" ||
+type === "driving_license"
+);
+}
+
+function isExpired(date?: string | null) {
+if (!date) return false;
+
+const today = new Date();
+const expiration = new Date(`${date}T23:59:59`);
+
+return expiration < today;
+}
+
+function isExpiringSoon(date?: string | null) {
+if (!date) return false;
+
+const today = new Date();
+const expiration = new Date(`${date}T23:59:59`);
+
+const diff =
+expiration.getTime() - today.getTime();
+
+const days = diff / (1000 * 60 * 60 * 24);
+
+return days >= 0 && days <= 30;
+}
 
 export default function Home() {
 const [session, setSession] = useState<any>(null);
@@ -105,6 +127,7 @@ const [loading, setLoading] = useState(true);
 const [email, setEmail] = useState("");
 const [password, setPassword] = useState("");
 const [loginMode, setLoginMode] = useState(true);
+
 const [message, setMessage] = useState("");
 const [submitting, setSubmitting] = useState(false);
 
@@ -112,48 +135,43 @@ const [employee, setEmployee] = useState<Employee | null>(null);
 const [employees, setEmployees] = useState<Employee[]>([]);
 const [documents, setDocuments] = useState<Document[]>([]);
 
-const [adminLoading, setAdminLoading] = useState(false);
-
-const [adminSection, setAdminSection] = useState<
-"dashboard" | "employees" | "upload"
->("dashboard");
-
 const [selectedEmployee, setSelectedEmployee] = useState("");
-const [documentType, setDocumentType] = useState("payslip");
-const [month, setMonth] = useState(new Date().getMonth() + 1);
-const [year, setYear] = useState(new Date().getFullYear());
-const [expiryDate, setExpiryDate] = useState("");
-const [file, setFile] = useState<File | null>(null);
-
-const [employeeSearch, setEmployeeSearch] = useState("");
-const [selectedEmployeeProfile, setSelectedEmployeeProfile] =
+const [selectedEmployeeData, setSelectedEmployeeData] =
 useState<Employee | null>(null);
 
-const [employeePhoto, setEmployeePhoto] = useState<File | null>(null);
+const [employeeSearch, setEmployeeSearch] = useState("");
 const [employeePhotoUrl, setEmployeePhotoUrl] = useState("");
-const [photoUploading, setPhotoUploading] = useState(false);
+
+const [category, setCategory] = useState("retribuzione");
+const [documentType, setDocumentType] = useState("payslip");
+
+const [month, setMonth] = useState(
+new Date().getMonth() + 1
+);
+
+const [year, setYear] = useState(
+new Date().getFullYear()
+);
+
+const [expirationDate, setExpirationDate] =
+useState("");
+
+const [fiscalCode, setFiscalCode] = useState("");
+
+const [file, setFile] = useState<File | null>(null);
+
+const [photoFile, setPhotoFile] =
+useState<File | null>(null);
+
+const [adminLoading, setAdminLoading] =
+useState(false);
+
+const [photoLoading, setPhotoLoading] =
+useState(false);
 
 const isAdmin =
-session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
-
-const selectedDocumentType = useMemo(
-() => DOCUMENT_TYPES.find((item) => item.value === documentType),
-[documentType]
-);
-
-const filteredEmployees = useMemo(() => {
-const search = employeeSearch.trim().toLowerCase();
-
-if (!search) return employees;
-
-return employees.filter((emp) => {
-return (
-emp.full_name.toLowerCase().includes(search) ||
-emp.email?.toLowerCase().includes(search) ||
-emp.fiscal_code?.toLowerCase().includes(search)
-);
-});
-}, [employees, employeeSearch]);
+session?.user?.email?.toLowerCase() ===
+ADMIN_EMAIL.toLowerCase();
 
 useEffect(() => {
 supabase.auth.getSession().then(({ data }) => {
@@ -163,10 +181,12 @@ setLoading(false);
 
 const {
 data: { subscription },
-} = supabase.auth.onAuthStateChange((_event, newSession) => {
+} = supabase.auth.onAuthStateChange(
+(_event, newSession) => {
 setSession(newSession);
 setLoading(false);
-});
+}
+);
 
 return () => subscription.unsubscribe();
 }, []);
@@ -181,23 +201,65 @@ loadEmployeeArea();
 }
 }, [session, isAdmin]);
 
-async function handleSubmit(e: React.FormEvent) {
+useEffect(() => {
+if (!selectedEmployee) {
+setSelectedEmployeeData(null);
+setEmployeePhotoUrl("");
+return;
+}
+
+const emp = employees.find(
+(item) => item.id === selectedEmployee
+);
+
+setSelectedEmployeeData(emp || null);
+
+if (emp?.fiscal_code) {
+setFiscalCode(emp.fiscal_code);
+} else {
+setFiscalCode("");
+}
+
+loadEmployeePhoto(emp || null);
+}, [selectedEmployee, employees]);
+
+useEffect(() => {
+const types =
+documentTypes[category] || [];
+
+if (
+types.length > 0 &&
+!types.some(
+(item) => item.value === documentType
+)
+) {
+setDocumentType(types[0].value);
+}
+}, [category]);
+
+async function handleSubmit(
+e: React.FormEvent
+) {
 e.preventDefault();
 
 setMessage("");
 setSubmitting(true);
 
 if (loginMode) {
-const { error } = await supabase.auth.signInWithPassword({
+const { error } =
+await supabase.auth.signInWithPassword({
 email,
 password,
 });
 
 if (error) {
-setMessage("Email o password non corretti.");
+setMessage(
+"Email o password non corretti."
+);
 }
 } else {
-const { error } = await supabase.auth.signUp({
+const { error } =
+await supabase.auth.signUp({
 email,
 password,
 });
@@ -221,7 +283,8 @@ setSession(null);
 setEmployee(null);
 setDocuments([]);
 setEmployees([]);
-setSelectedEmployeeProfile(null);
+setSelectedEmployee("");
+setSelectedEmployeeData(null);
 setEmployeePhotoUrl("");
 setEmail("");
 setPassword("");
@@ -230,10 +293,14 @@ setPassword("");
 async function loadEmployeeArea() {
 if (!session?.user?.id) return;
 
-const { data: emp, error: empError } = await supabase
+const { data: emp, error: empError } =
+await supabase
 .from("employees")
 .select("*")
-.eq("auth_user_id", session.user.id)
+.eq(
+"auth_user_id",
+session.user.id
+)
 .maybeSingle();
 
 if (empError) {
@@ -245,12 +312,17 @@ setEmployee(emp);
 
 if (!emp) return;
 
-const { data: docs, error: docsError } = await supabase
+const { data: docs, error: docsError } =
+await supabase
 .from("documents")
 .select("*")
 .eq("employee_id", emp.id)
-.order("year", { ascending: false })
-.order("month", { ascending: false });
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
 
 if (docsError) {
 console.error(docsError);
@@ -258,6 +330,8 @@ return;
 }
 
 setDocuments(docs || []);
+
+await loadEmployeePhoto(emp);
 }
 
 async function loadEmployees() {
@@ -271,7 +345,9 @@ const { data, error } = await supabase
 
 if (error) {
 console.error(error);
-setMessage("Impossibile caricare i dipendenti.");
+setMessage(
+"Impossibile caricare i dipendenti."
+);
 } else {
 setEmployees(data || []);
 }
@@ -279,201 +355,275 @@ setEmployees(data || []);
 setAdminLoading(false);
 }
 
-async function openEmployeeProfile(emp: Employee) {
-setSelectedEmployeeProfile(emp);
+async function loadEmployeePhoto(
+emp: Employee | null
+) {
 setEmployeePhotoUrl("");
-setEmployeePhoto(null);
-setMessage("");
 
-if (!emp.photo_path) return;
+if (!emp) return;
 
-const { data, error } = await supabase.storage
+const path =
+emp.photo_path ||
+`${emp.id}/photo`;
+
+const { data, error } =
+await supabase.storage
 .from("employee-photos")
-.createSignedUrl(emp.photo_path, 600);
+.createSignedUrl(path, 3600);
 
-if (error) {
-console.error(error);
-return;
-}
-
-if (data?.signedUrl) {
-setEmployeePhotoUrl(data.signedUrl);
+if (!error && data?.signedUrl) {
+setEmployeePhotoUrl(
+data.signedUrl
+);
 }
 }
 
 async function uploadEmployeePhoto() {
-if (!selectedEmployeeProfile) {
-setMessage("Seleziona un dipendente.");
+if (!selectedEmployee) {
+setMessage(
+"Seleziona prima un dipendente."
+);
 return;
 }
 
-if (!employeePhoto) {
-setMessage("Seleziona una foto.");
+if (!photoFile) {
+setMessage(
+"Seleziona una foto."
+);
 return;
 }
 
 if (
-!["image/jpeg", "image/png", "image/webp"].includes(
-employeePhoto.type
-)
+!photoFile.type.startsWith("image/")
 ) {
-setMessage("La foto deve essere JPG, PNG oppure WEBP.");
+setMessage(
+"Il file deve essere un'immagine."
+);
 return;
 }
 
-if (employeePhoto.size > 5 * 1024 * 1024) {
-setMessage("La foto non può superare 5 MB.");
-return;
-}
-
-setPhotoUploading(true);
+setPhotoLoading(true);
 setMessage("");
 
 try {
-const extension =
-employeePhoto.type === "image/png"
-? "png"
-: employeePhoto.type === "image/webp"
-? "webp"
-: "jpg";
+const path =
+`${selectedEmployee}/photo`;
 
-const storagePath = `${
-selectedEmployeeProfile.id
-}/${crypto.randomUUID()}.${extension}`;
-
-const { error: uploadError } = await supabase.storage
+const { error } =
+await supabase.storage
 .from("employee-photos")
-.upload(storagePath, employeePhoto, {
-upsert: false,
-contentType: employeePhoto.type,
-});
+.upload(
+path,
+photoFile,
+{
+upsert: true,
+contentType:
+photoFile.type,
+}
+);
 
-if (uploadError) {
-throw uploadError;
+if (error) {
+throw error;
 }
 
-const { error: updateError } = await supabase
+await supabase
 .from("employees")
 .update({
-photo_path: storagePath,
+photo_path: path,
 })
-.eq("id", selectedEmployeeProfile.id);
-
-if (updateError) {
-throw updateError;
-}
-
-const updatedEmployee = {
-...selectedEmployeeProfile,
-photo_path: storagePath,
-};
-
-setSelectedEmployeeProfile(updatedEmployee);
-
-setEmployees((current) =>
-current.map((emp) =>
-emp.id === updatedEmployee.id ? updatedEmployee : emp
-)
+.eq(
+"id",
+selectedEmployee
 );
 
-const { data: signedData } = await supabase.storage
-.from("employee-photos")
-.createSignedUrl(storagePath, 600);
+setMessage(
+"Foto dipendente aggiornata. ✅"
+);
 
-if (signedData?.signedUrl) {
-setEmployeePhotoUrl(signedData.signedUrl);
-}
+setPhotoFile(null);
 
-setEmployeePhoto(null);
-setMessage("Foto del dipendente caricata correttamente. ✅");
+await loadEmployees();
+
+const emp =
+employees.find(
+(item) =>
+item.id === selectedEmployee
+);
+
+await loadEmployeePhoto(
+emp || selectedEmployeeData
+);
 } catch (error: any) {
 console.error(error);
+
 setMessage(
-error?.message || "Errore durante il caricamento della foto."
+error?.message ||
+"Errore durante il caricamento della foto."
 );
 }
 
-setPhotoUploading(false);
+setPhotoLoading(false);
 }
 
 async function uploadDocument() {
 setMessage("");
 
 if (!selectedEmployee) {
-setMessage("Seleziona un dipendente.");
+setMessage(
+"Seleziona un dipendente."
+);
 return;
 }
 
 if (!file) {
-setMessage("Seleziona un file PDF.");
-return;
-}
-
-if (file.type !== "application/pdf") {
-setMessage("Il documento deve essere un PDF.");
+setMessage(
+"Seleziona un file PDF."
+);
 return;
 }
 
 if (
-selectedDocumentType?.expiry &&
-!expiryDate
+file.type !==
+"application/pdf"
 ) {
-setMessage("Inserisci la data di scadenza del documento.");
+setMessage(
+"Il documento deve essere un PDF."
+);
+return;
+}
+
+if (
+requiresExpiration(
+documentType
+) &&
+!expirationDate
+) {
+setMessage(
+"Inserisci la data di scadenza del documento."
+);
+return;
+}
+
+if (
+documentType ===
+"driving_license" &&
+!fiscalCode.trim()
+) {
+setMessage(
+"Per la patente il codice fiscale è obbligatorio."
+);
 return;
 }
 
 setSubmitting(true);
 
 try {
-const employeeFolder = selectedEmployee;
+const safeFileName =
+file.name
+.replace(
+/[^\w.\- ]/g,
+""
+)
+.replace(
+/\s+/g,
+"_"
+);
 
-const safeFileName = file.name
-.replace(/[^\w.\- ]/g, "")
-.replace(/\s+/g, "_");
+const storagePath =
+`${selectedEmployee}/${Date.now()}_${safeFileName}`;
 
-const storagePath = `${employeeFolder}/${Date.now()}_${safeFileName}`;
-
-const { error: uploadError } = await supabase.storage
+const {
+error: uploadError,
+} = await supabase.storage
 .from("payroll-documents")
-.upload(storagePath, file, {
+.upload(
+storagePath,
+file,
+{
 upsert: false,
-contentType: "application/pdf",
-});
+contentType:
+"application/pdf",
+}
+);
 
 if (uploadError) {
 throw uploadError;
 }
 
-const { error: documentError } = await supabase
+const {
+error: documentError,
+} = await supabase
 .from("documents")
 .insert({
-employee_id: selectedEmployee,
-document_type: documentType,
-month,
+employee_id:
+selectedEmployee,
+
+document_category:
+category,
+
+document_type:
+documentType,
+
+month:
+category ===
+"retribuzione"
+? month
+: null,
+
 year,
-file_name: file.name,
-storage_path: storagePath,
-expiry_date: expiryDate || null,
+
+file_name:
+file.name,
+
+storage_path:
+storagePath,
+
+expiration_date:
+expirationDate ||
+null,
+
+fiscal_code:
+fiscalCode
+.trim()
+.toUpperCase() ||
+null,
 });
 
 if (documentError) {
 throw documentError;
 }
 
-setMessage("Documento caricato correttamente. ✅");
+setMessage(
+"Documento caricato correttamente. ✅"
+);
 
-setSelectedEmployee("");
-setDocumentType("payslip");
-setMonth(new Date().getMonth() + 1);
-setYear(new Date().getFullYear());
-setExpiryDate("");
 setFile(null);
+setExpirationDate("");
 
-const input = document.getElementById(
+const input =
+document.getElementById(
 "document-file"
 ) as HTMLInputElement | null;
 
-if (input) input.value = "";
+if (input) {
+input.value = "";
+}
+
+setCategory(
+"retribuzione"
+);
+
+setDocumentType(
+"payslip"
+);
+
+setMonth(
+new Date().getMonth() + 1
+);
+
+setYear(
+new Date().getFullYear()
+);
 } catch (error: any) {
 console.error(error);
 
@@ -486,41 +636,74 @@ error?.message ||
 setSubmitting(false);
 }
 
-async function openDocument(doc: Document) {
-const { data, error } = await supabase.storage
+async function openDocument(
+doc: Document
+) {
+const { data, error } =
+await supabase.storage
 .from("payroll-documents")
-.createSignedUrl(doc.storage_path, 300);
+.createSignedUrl(
+doc.storage_path,
+300
+);
 
 if (error) {
 console.error(error);
-setMessage("Impossibile aprire il documento.");
+
+setMessage(
+"Impossibile aprire il documento."
+);
+
 return;
 }
 
 if (data?.signedUrl) {
-window.open(data.signedUrl, "_blank");
-}
-}
-
-function documentLabel(type: string) {
-const found = DOCUMENT_TYPES.find(
-(item) => item.value === type
+window.open(
+data.signedUrl,
+"_blank"
 );
-
-if (found) return found.label;
-
-return "Documento";
+}
 }
 
-function initials(name: string) {
-return name
-.split(" ")
-.filter(Boolean)
-.map((part) => part[0])
-.slice(0, 2)
-.join("")
-.toUpperCase();
+const filteredEmployees =
+useMemo(() => {
+const search =
+employeeSearch
+.trim()
+.toLowerCase();
+
+if (!search) {
+return employees;
 }
+
+return employees.filter(
+(emp) => {
+const name =
+emp.full_name
+?.toLowerCase() ||
+"";
+
+const email =
+emp.email
+?.toLowerCase() ||
+"";
+
+const cf =
+emp.fiscal_code
+?.toLowerCase() ||
+"";
+
+return (
+name.includes(search) ||
+email.includes(search) ||
+cf.includes(search)
+);
+}
+);
+}, [
+employees,
+employeeSearch,
+]);
 
 if (loading) {
 return (
@@ -530,78 +713,106 @@ minHeight: "100vh",
 display: "flex",
 alignItems: "center",
 justifyContent: "center",
-background: "#07141f",
+background:
+"#07141f",
 color: "white",
-fontFamily: "Arial, sans-serif",
+fontFamily:
+"Arial, sans-serif",
 }}
 >
-<div style={{ textAlign: "center" }}>
+<div
+style={{
+textAlign:
+"center",
+}}
+>
 <div
 style={{
 width: 70,
 height: 70,
 borderRadius: 20,
-background: "#16c784",
-color: "#062019",
+background:
+"#16c784",
 display: "flex",
-alignItems: "center",
-justifyContent: "center",
+alignItems:
+"center",
+justifyContent:
+"center",
 fontSize: 38,
-fontWeight: 800,
-margin: "0 auto 20px",
+fontWeight: 900,
+margin:
+"0 auto 20px",
 }}
 >
 B
 </div>
 
-<div style={{ fontSize: 18, opacity: 0.8 }}>
-Caricamento BARDOC PAY...
+<div
+style={{
+fontSize: 18,
+opacity: 0.8,
+}}
+>
+Caricamento
+BARDOC PAY...
 </div>
 </div>
 </div>
 );
 }
 
-/*
-* LOGIN
-*/
-
 if (!session) {
 return (
 <main
 style={{
-minHeight: "100vh",
+minHeight:
+"100vh",
 background:
-"linear-gradient(135deg, #07141f 0%, #102936 55%, #07141f 100%)",
+"linear-gradient(135deg,#07141f 0%,#102936 55%,#07141f 100%)",
 display: "flex",
-alignItems: "center",
-justifyContent: "center",
+alignItems:
+"center",
+justifyContent:
+"center",
 padding: 24,
-fontFamily: "Arial, sans-serif",
+fontFamily:
+"Arial, sans-serif",
 }}
 >
 <div
 style={{
 width: "100%",
 maxWidth: 460,
-background: "#ffffff",
+background:
+"#ffffff",
 borderRadius: 28,
 padding: 42,
-boxShadow: "0 25px 70px rgba(0,0,0,0.35)",
+boxShadow:
+"0 25px 70px rgba(0,0,0,.35)",
 }}
 >
-<div style={{ textAlign: "center" }}>
+<div
+style={{
+textAlign:
+"center",
+}}
+>
 <div
 style={{
 width: 82,
 height: 82,
-margin: "0 auto 20px",
+margin:
+"0 auto 20px",
 borderRadius: 24,
-background: "#16c784",
-color: "#062019",
+background:
+"#16c784",
+color:
+"#062019",
 display: "flex",
-alignItems: "center",
-justifyContent: "center",
+alignItems:
+"center",
+justifyContent:
+"center",
 fontSize: 46,
 fontWeight: 900,
 }}
@@ -611,9 +822,11 @@ B
 
 <div
 style={{
-color: "#16a970",
+color:
+"#16a970",
 fontWeight: 800,
-letterSpacing: 1.5,
+letterSpacing:
+1.5,
 fontSize: 14,
 }}
 >
@@ -622,8 +835,10 @@ BARDOC SERVICE
 
 <h1
 style={{
-margin: "8px 0 6px",
-color: "#13202b",
+margin:
+"8px 0 6px",
+color:
+"#13202b",
 fontSize: 30,
 }}
 >
@@ -632,20 +847,26 @@ Portale Dipendenti
 
 <p
 style={{
-margin: "0 0 30px",
-color: "#74808a",
-fontSize: 15,
+margin:
+"0 0 30px",
+color:
+"#74808a",
 }}
 >
-Accedi alla tua area personale
+Accedi alla tua
+area personale
 </p>
 </div>
 
 <form
-onSubmit={handleSubmit}
+onSubmit={
+handleSubmit
+}
 style={{
-display: "flex",
-flexDirection: "column",
+display:
+"flex",
+flexDirection:
+"column",
 gap: 16,
 }}
 >
@@ -653,14 +874,23 @@ gap: 16,
 type="email"
 placeholder="Email"
 value={email}
-onChange={(e) => setEmail(e.target.value)}
+onChange={(e) =>
+setEmail(
+e.target.value
+)
+}
 required
 style={{
-width: "100%",
-boxSizing: "border-box",
-padding: "14px 15px",
-borderRadius: 12,
-border: "1px solid #dce3e7",
+width:
+"100%",
+boxSizing:
+"border-box",
+padding:
+"14px 15px",
+borderRadius:
+12,
+border:
+"1px solid #dce3e7",
 fontSize: 15,
 }}
 />
@@ -669,30 +899,46 @@ fontSize: 15,
 type="password"
 placeholder="Password"
 value={password}
-onChange={(e) => setPassword(e.target.value)}
+onChange={(e) =>
+setPassword(
+e.target.value
+)
+}
 required
 style={{
-width: "100%",
-boxSizing: "border-box",
-padding: "14px 15px",
-borderRadius: 12,
-border: "1px solid #dce3e7",
+width:
+"100%",
+boxSizing:
+"border-box",
+padding:
+"14px 15px",
+borderRadius:
+12,
+border:
+"1px solid #dce3e7",
 fontSize: 15,
 }}
 />
 
 <button
 type="submit"
-disabled={submitting}
+disabled={
+submitting
+}
 style={{
-padding: "15px 18px",
+padding:
+"15px 18px",
 border: "none",
-borderRadius: 12,
-background: "#16c784",
-color: "#062019",
+borderRadius:
+12,
+background:
+"#16c784",
+color:
+"#062019",
 fontSize: 16,
 fontWeight: 800,
-cursor: "pointer",
+cursor:
+"pointer",
 }}
 >
 {submitting
@@ -706,18 +952,24 @@ cursor: "pointer",
 <button
 type="button"
 onClick={() => {
-setLoginMode(!loginMode);
+setLoginMode(
+!loginMode
+);
 setMessage("");
 }}
 style={{
-display: "block",
+display:
+"block",
 width: "100%",
 marginTop: 22,
 border: "none",
-background: "transparent",
-color: "#119e6a",
+background:
+"transparent",
+color:
+"#119e6a",
 fontWeight: 700,
-cursor: "pointer",
+cursor:
+"pointer",
 }}
 >
 {loginMode
@@ -730,10 +982,14 @@ cursor: "pointer",
 style={{
 marginTop: 20,
 padding: 13,
-borderRadius: 12,
-background: "#f1f7f5",
-color: "#285d4b",
-textAlign: "center",
+borderRadius:
+12,
+background:
+"#f1f7f5",
+color:
+"#285d4b",
+textAlign:
+"center",
 }}
 >
 {message}
@@ -744,61 +1000,49 @@ textAlign: "center",
 );
 }
 
-/*
-* AREA AMMINISTRATORE
-*/
-
 if (isAdmin) {
 return (
 <main
 style={{
-minHeight: "100vh",
-background: "#121820",
-fontFamily: "Arial, sans-serif",
-color: "#f1f5f6",
+minHeight:
+"100vh",
+background:
+"#17202b",
+fontFamily:
+"Arial, sans-serif",
+color:
+"#ffffff",
 }}
 >
-<div
+<header
 style={{
+background:
+"#111923",
+borderBottom:
+"1px solid #293541",
+padding:
+"18px 28px",
 display: "flex",
-minHeight: "100vh",
+justifyContent:
+"space-between",
+alignItems:
+"center",
 }}
 >
-{/* SIDEBAR */}
-
-<aside
+<div>
+<strong
 style={{
-width: 240,
-background: "#0b1118",
-borderRight: "1px solid #26313a",
-padding: 20,
-boxSizing: "border-box",
-display: "flex",
-flexDirection: "column",
+fontSize: 21,
 }}
 >
-<div
-style={{
-padding: "10px 12px 25px",
-borderBottom: "1px solid #26313a",
-marginBottom: 20,
-}}
->
-<div
-style={{
-fontSize: 20,
-fontWeight: 900,
-color: "#ffffff",
-}}
->
-BARDOC <span style={{ color: "#16c784" }}>PAY</span>
-</div>
+BARDOC PAY
+</strong>
 
 <div
 style={{
-marginTop: 5,
-fontSize: 12,
-color: "#7f8c94",
+color:
+"#8f9ca7",
+fontSize: 13,
 }}
 >
 Area amministratore
@@ -806,132 +1050,51 @@ Area amministratore
 </div>
 
 <button
-onClick={() => {
-setAdminSection("dashboard");
-setSelectedEmployeeProfile(null);
-setMessage("");
-}}
-style={{
-width: "100%",
-padding: "13px 14px",
-marginBottom: 6,
-border: "none",
-borderRadius: 10,
-textAlign: "left",
-background:
-adminSection === "dashboard"
-? "#16c784"
-: "transparent",
-color:
-adminSection === "dashboard"
-? "#062019"
-: "#aebbc2",
-fontWeight: 700,
-cursor: "pointer",
-}}
->
-▣ Dashboard
-</button>
-
-<button
-onClick={() => {
-setAdminSection("employees");
-setSelectedEmployeeProfile(null);
-setMessage("");
-}}
-style={{
-width: "100%",
-padding: "13px 14px",
-marginBottom: 6,
-border: "none",
-borderRadius: 10,
-textAlign: "left",
-background:
-adminSection === "employees"
-? "#16c784"
-: "transparent",
-color:
-adminSection === "employees"
-? "#062019"
-: "#aebbc2",
-fontWeight: 700,
-cursor: "pointer",
-}}
->
-👥 Dipendenti
-</button>
-
-<button
-onClick={() => {
-setAdminSection("upload");
-setSelectedEmployeeProfile(null);
-setMessage("");
-}}
-style={{
-width: "100%",
-padding: "13px 14px",
-marginBottom: 6,
-border: "none",
-borderRadius: 10,
-textAlign: "left",
-background:
-adminSection === "upload"
-? "#16c784"
-: "transparent",
-color:
-adminSection === "upload"
-? "#062019"
-: "#aebbc2",
-fontWeight: 700,
-cursor: "pointer",
-}}
->
-↑ Carica documento
-</button>
-
-<div style={{ flex: 1 }} />
-
-<button
 onClick={logout}
 style={{
-width: "100%",
-padding: 12,
-border: "1px solid #33414a",
-borderRadius: 10,
-background: "transparent",
-color: "#d8e0e3",
+padding:
+"10px 17px",
+border:
+"1px solid #394652",
+borderRadius:
+10,
+background:
+"#1b2631",
+color:
+"#ffffff",
 fontWeight: 700,
-cursor: "pointer",
+cursor:
+"pointer",
 }}
 >
 Esci
 </button>
-</aside>
-
-{/* CONTENUTO */}
+</header>
 
 <section
 style={{
-flex: 1,
+maxWidth:
+1200,
+margin:
+"0 auto",
 padding: 30,
-boxSizing: "border-box",
-overflowX: "auto",
 }}
 >
-{adminSection === "dashboard" && (
-<>
 <div
 style={{
 background:
-"linear-gradient(135deg,#07141f,#102d39)",
-borderRadius: 22,
+"linear-gradient(135deg,#0d1824,#243442)",
+borderRadius:
+22,
 padding: 30,
-marginBottom: 22,
+marginBottom:
+22,
 }}
 >
 <div
 style={{
-color: "#16c784",
+color:
+"#16c784",
 fontWeight: 800,
 fontSize: 13,
 }}
@@ -939,251 +1102,172 @@ fontSize: 13,
 AMMINISTRAZIONE
 </div>
 
-<h1 style={{ margin: "8px 0" }}>
-Dashboard
+<h1
+style={{
+margin:
+"8px 0",
+fontSize: 32,
+}}
+>
+Gestione personale
 </h1>
 
 <p
 style={{
 margin: 0,
-color: "#b8c5cb",
+color:
+"#aebbc4",
 }}
 >
-Gestione del personale e documentazione BARDOC PAY.
+Cerca un dipendente
+e gestisci il suo
+fascicolo digitale.
 </p>
 </div>
 
-<div
-style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(220px,1fr))",
-gap: 18,
-}}
->
-<div
-style={{
-background: "#1a232c",
-border: "1px solid #29343d",
-borderRadius: 18,
-padding: 24,
-}}
->
-<div style={{ color: "#8c9aa2" }}>
-Dipendenti attivi
-</div>
-
-<div
-style={{
-fontSize: 36,
-fontWeight: 900,
-marginTop: 10,
-}}
->
-{employees.length}
-</div>
-</div>
-
-<div
-style={{
-background: "#1a232c",
-border: "1px solid #29343d",
-borderRadius: 18,
-padding: 24,
-}}
->
-<div style={{ color: "#8c9aa2" }}>
-Documenti caricati
-</div>
-
-<div
-style={{
-fontSize: 36,
-fontWeight: 900,
-marginTop: 10,
-}}
->
-—
-</div>
-</div>
-
-<div
-style={{
-background: "#1a232c",
-border: "1px solid #29343d",
-borderRadius: 18,
-padding: 24,
-}}
->
-<div style={{ color: "#8c9aa2" }}>
-Azioni rapide
-</div>
-
-<button
-onClick={() =>
-setAdminSection("employees")
-}
-style={{
-marginTop: 15,
-padding: "11px 15px",
-border: "none",
-borderRadius: 10,
-background: "#16c784",
-color: "#062019",
-fontWeight: 800,
-cursor: "pointer",
-}}
->
-Cerca dipendente
-</button>
-</div>
-</div>
-</>
-)}
-
-{adminSection === "employees" && (
-<>
 <div
 style={{
 background:
-"linear-gradient(135deg,#07141f,#102d39)",
-borderRadius: 22,
-padding: 30,
-marginBottom: 22,
-}}
->
-<div
-style={{
-color: "#16c784",
-fontWeight: 800,
-fontSize: 13,
-}}
->
-PERSONALE
-</div>
-
-<h1 style={{ margin: "8px 0" }}>
-Dipendenti
-</h1>
-
-<p
-style={{
-margin: 0,
-color: "#b8c5cb",
-}}
->
-Cerca e gestisci la scheda personale dei dipendenti.
-</p>
-</div>
-
-<div
-style={{
-background: "#1a232c",
-border: "1px solid #29343d",
-borderRadius: 20,
+"#202b36",
+border:
+"1px solid #33404b",
+borderRadius:
+20,
 padding: 25,
+marginBottom:
+20,
 }}
 >
-{!selectedEmployeeProfile ? (
-<>
-<input
-type="text"
-placeholder="Cerca nome, email o codice fiscale..."
-value={employeeSearch}
-onChange={(e) =>
-setEmployeeSearch(e.target.value)
-}
+<label
 style={{
-width: "100%",
-boxSizing: "border-box",
-padding: "15px 16px",
-borderRadius: 12,
-border: "1px solid #394650",
-background: "#111920",
-color: "#ffffff",
+display:
+"block",
+marginBottom:
+8,
+fontWeight: 700,
+}}
+>
+Cerca dipendente
+</label>
+
+<input
+value={
+employeeSearch
+}
+onChange={(e) =>
+setEmployeeSearch(
+e.target.value
+)
+}
+placeholder="Nome, email o codice fiscale..."
+style={{
+width:
+"100%",
+boxSizing:
+"border-box",
+padding:
+"14px 15px",
+borderRadius:
+12,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
 fontSize: 15,
-marginBottom: 20,
 }}
 />
 
-{adminLoading ? (
 <div
 style={{
-padding: 30,
-textAlign: "center",
-color: "#8c9aa2",
+marginTop: 15,
+display:
+"grid",
+gridTemplateColumns:
+"1fr",
+gap: 8,
 }}
 >
-Caricamento dipendenti...
-</div>
-) : filteredEmployees.length === 0 ? (
-<div
-style={{
-padding: 30,
-textAlign: "center",
-color: "#8c9aa2",
-}}
->
-Nessun dipendente trovato.
-</div>
-) : (
-<div
-style={{
-display: "grid",
-gap: 10,
-}}
->
-{filteredEmployees.map((emp) => (
+{filteredEmployees
+.slice(0, 8)
+.map((emp) => (
 <button
-key={emp.id}
+key={
+emp.id
+}
 onClick={() =>
-openEmployeeProfile(emp)
+setSelectedEmployee(
+emp.id
+)
 }
 style={{
-display: "flex",
-alignItems: "center",
-gap: 15,
-width: "100%",
-padding: 16,
+display:
+"flex",
+alignItems:
+"center",
+gap: 12,
+textAlign:
+"left",
+padding:
+"12px 14px",
+borderRadius:
+12,
 border:
-"1px solid #2d3942",
-borderRadius: 14,
-background: "#111920",
-color: "#ffffff",
-cursor: "pointer",
-textAlign: "left",
+"1px solid #35434f",
+background:
+selectedEmployee ===
+emp.id
+? "#263944"
+: "#18232d",
+color:
+"#ffffff",
+cursor:
+"pointer",
 }}
 >
 <div
 style={{
-width: 52,
-height: 52,
-borderRadius: "50%",
-background: "#16c784",
-color: "#062019",
-display: "flex",
-alignItems: "center",
-justifyContent: "center",
-fontWeight: 900,
-fontSize: 18,
-flexShrink: 0,
+width: 38,
+height: 38,
+borderRadius:
+"50%",
+background:
+"#16c784",
+color:
+"#062019",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
+fontWeight:
+900,
 }}
 >
-{initials(emp.full_name)}
+{emp.full_name
+?.charAt(
+0
+)
+.toUpperCase()}
 </div>
 
-<div style={{ flex: 1 }}>
-<strong
-style={{ fontSize: 16 }}
->
-{emp.full_name}
+<div>
+<strong>
+{
+emp.full_name
+}
 </strong>
 
 <div
 style={{
-color: "#8c9aa2",
-fontSize: 13,
-marginTop: 4,
+color:
+"#8796a2",
+fontSize:
+12,
+marginTop:
+3,
 }}
 >
 {emp.email ||
@@ -1193,445 +1277,1156 @@ marginTop: 4,
 {emp.fiscal_code && (
 <div
 style={{
-color: "#8c9aa2",
-fontSize: 12,
-marginTop: 3,
+color:
+"#16c784",
+fontSize:
+11,
+marginTop:
+2,
 }}
 >
 CF:{" "}
-{emp.fiscal_code}
+{
+emp.fiscal_code
+}
 </div>
 )}
 </div>
-
-<span
-style={{
-color: "#16c784",
-fontWeight: 800,
-fontSize: 12,
-}}
->
-● ATTIVO
-</span>
 </button>
 ))}
 </div>
-)}
-</>
-) : (
+</div>
+
+{selectedEmployeeData && (
 <>
-<button
-onClick={() => {
-setSelectedEmployeeProfile(null);
-setEmployeePhotoUrl("");
-setEmployeePhoto(null);
-}}
-style={{
-border: "none",
-background: "transparent",
-color: "#16c784",
-fontWeight: 800,
-cursor: "pointer",
-marginBottom: 20,
-}}
->
-← Torna ai dipendenti
-</button>
-
 <div
 style={{
-display: "grid",
+display:
+"grid",
 gridTemplateColumns:
-"260px minmax(0,1fr)",
-gap: 24,
+"280px 1fr",
+gap: 20,
+marginBottom:
+20,
 }}
 >
-{/* FOTO */}
-
 <div
 style={{
-background: "#0b1118",
+background:
+"#202b36",
 border:
-"1px solid #29343d",
-borderRadius: 20,
+"1px solid #33404b",
+borderRadius:
+20,
 padding: 24,
-textAlign: "center",
+textAlign:
+"center",
+}}
+>
+<div
+style={{
+width: 150,
+height: 150,
+borderRadius:
+18,
+margin:
+"0 auto 18px",
+overflow:
+"hidden",
+background:
+"#0e1821",
+border:
+"3px solid #16c784",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
 }}
 >
 {employeePhotoUrl ? (
 <img
-src={employeePhotoUrl}
-alt={
-selectedEmployeeProfile.full_name
+src={
+employeePhotoUrl
 }
+alt="Foto dipendente"
 style={{
-width: 170,
-height: 170,
-borderRadius: "50%",
-objectFit: "cover",
-display: "block",
-margin:
-"0 auto 18px",
-border:
-"4px solid #16c784",
+width:
+"100%",
+height:
+"100%",
+objectFit:
+"cover",
 }}
 />
 ) : (
-<div
+<span
 style={{
-width: 170,
-height: 170,
-borderRadius: "50%",
-background:
+fontSize:
+55,
+fontWeight:
+900,
+color:
 "#16c784",
-color: "#062019",
-display: "flex",
-alignItems: "center",
-justifyContent:
-"center",
-margin:
-"0 auto 18px",
-fontSize: 50,
-fontWeight: 900,
 }}
 >
-{initials(
-selectedEmployeeProfile.full_name
-)}
-</div>
-)}
-
-<strong
-style={{
-fontSize: 18,
-}}
->
-{
-selectedEmployeeProfile.full_name
-}
-</strong>
-
-<div
-style={{
-color: "#16c784",
-fontSize: 13,
-fontWeight: 800,
-marginTop: 8,
-}}
->
-● ATTIVO
-</div>
-
-<label
-style={{
-display: "block",
-marginTop: 22,
-padding: 12,
-borderRadius: 10,
-background:
-"#16c784",
-color: "#062019",
-fontWeight: 800,
-cursor: "pointer",
-}}
->
-📷 Carica / cambia foto
-
-<input
-type="file"
-accept="image/jpeg,image/png,image/webp"
-onChange={(e) =>
-setEmployeePhoto(
-e.target.files?.[0] ||
-null
+{selectedEmployeeData.full_name
+?.charAt(
+0
 )
-}
-style={{
-display: "none",
-}}
-/>
-</label>
-
-{employeePhoto && (
-<button
-onClick={
-uploadEmployeePhoto
-}
-disabled={
-photoUploading
-}
-style={{
-width: "100%",
-marginTop: 10,
-padding: 11,
-border:
-"1px solid #16c784",
-borderRadius: 10,
-background:
-"transparent",
-color: "#16c784",
-fontWeight: 800,
-cursor: "pointer",
-}}
->
-{photoUploading
-? "Caricamento..."
-: "SALVA FOTO"}
-</button>
+.toUpperCase()}
+</span>
 )}
 </div>
 
-{/* DATI */}
-
-<div>
 <h2
 style={{
-marginTop: 0,
+margin:
+"0 0 6px",
+fontSize:
+20,
 }}
 >
 {
-selectedEmployeeProfile.full_name
+selectedEmployeeData.full_name
 }
 </h2>
 
 <div
 style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(220px,1fr))",
-gap: 14,
-}}
->
-<div
-style={{
-padding: 18,
-background:
-"#111920",
-borderRadius: 14,
-border:
-"1px solid #29343d",
-}}
->
-<small
-style={{
 color:
-"#8c9aa2",
+"#8998a4",
+fontSize:
+13,
 }}
 >
-Email
-</small>
-
-<div
-style={{
-fontWeight: 800,
-marginTop: 6,
-}}
->
-{selectedEmployeeProfile.email ||
-"—"}
-</div>
+{selectedEmployeeData.email ||
+"Email non presente"}
 </div>
 
 <div
 style={{
-padding: 18,
+marginTop:
+12,
+padding:
+"8px 10px",
+borderRadius:
+8,
 background:
-"#111920",
-borderRadius: 14,
-border:
-"1px solid #29343d",
-}}
->
-<small
-style={{
+"#162d27",
 color:
-"#8c9aa2",
+"#16c784",
+fontSize:
+12,
+fontWeight:
+700,
 }}
 >
 Codice fiscale
-</small>
+</div>
 
 <div
 style={{
-fontWeight: 800,
-marginTop: 6,
+marginTop:
+6,
+color:
+"#ffffff",
+fontSize:
+13,
+wordBreak:
+"break-all",
 }}
 >
-{selectedEmployeeProfile.fiscal_code ||
-"—"}
-</div>
+{selectedEmployeeData.fiscal_code ||
+"Non presente"}
 </div>
 
-<div
+<input
+type="file"
+accept="image/*"
+onChange={(e) =>
+setPhotoFile(
+e.target
+.files?.[0] ||
+null
+)
+}
 style={{
-padding: 18,
-background:
-"#111920",
-borderRadius: 14,
+marginTop:
+20,
+width:
+"100%",
+color:
+"#ffffff",
+fontSize:
+12,
+}}
+/>
+
+<button
+onClick={
+uploadEmployeePhoto
+}
+disabled={
+photoLoading
+}
+style={{
+width:
+"100%",
+marginTop:
+10,
+padding:
+"11px 12px",
 border:
-"1px solid #29343d",
-}}
->
-<small
-style={{
-color:
-"#8c9aa2",
-}}
->
-Stato
-</small>
-
-<div
-style={{
-fontWeight: 800,
-color:
+"none",
+borderRadius:
+10,
+background:
 "#16c784",
-marginTop: 6,
+color:
+"#062019",
+fontWeight:
+800,
+cursor:
+"pointer",
 }}
 >
-● Attivo
-</div>
-</div>
+{photoLoading
+? "Caricamento..."
+: "Aggiorna foto"}
+</button>
 </div>
 
-<h3
-style={{
-marginTop: 28,
-}}
->
-📁 Fascicolo digitale
-</h3>
-
-<div
-style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(190px,1fr))",
-gap: 12,
-}}
->
-{[
-"🪪 Documenti personali",
-"📑 Rapporto di lavoro",
-"💰 Buste paga",
-"🏦 Distinte di pagamento",
-"📝 Permessi e assenze",
-"📄 Curriculum",
-"🚨 Scadenze",
-].map((item) => (
-<div
-key={item}
-style={{
-padding: 17,
-borderRadius: 13,
-background:
-"#111920",
-border:
-"1px solid #29343d",
-fontWeight: 700,
-}}
->
-{item}
-</div>
-))}
-</div>
-</div>
-</div>
-
-{message && (
-<div
-style={{
-marginTop: 20,
-padding: 14,
-borderRadius: 12,
-background: "#12352b",
-color: "#8ff0c9",
-textAlign: "center",
-}}
->
-{message}
-</div>
-)}
-</>
-)}
-</div>
-</>
-)}
-
-{adminSection === "upload" && (
-<>
 <div
 style={{
 background:
-"linear-gradient(135deg,#07141f,#102d39)",
-borderRadius: 22,
-padding: 30,
-marginBottom: 22,
-}}
->
-<div
-style={{
-color: "#16c784",
-fontWeight: 800,
-fontSize: 13,
-}}
->
-AMMINISTRAZIONE
-</div>
-
-<h1 style={{ margin: "8px 0" }}>
-Carica documento
-</h1>
-
-<p
-style={{
-margin: 0,
-color: "#b8c5cb",
-}}
->
-Pubblica documenti e documentazione del personale.
-</p>
-</div>
-
-<div
-style={{
-background: "#1a232c",
+"#202b36",
 border:
-"1px solid #29343d",
-borderRadius: 20,
+"1px solid #33404b",
+borderRadius:
+20,
 padding: 28,
 }}
 >
 <div
 style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(250px,1fr))",
-gap: 18,
+color:
+"#16c784",
+fontWeight:
+800,
+fontSize:
+13,
 }}
 >
-{/* DIPENDENTE */}
+FASCICOLO DIGITALE
+</div>
 
+<h2
+style={{
+margin:
+"8px 0 10px",
+}}
+>
+{
+selectedEmployeeData.full_name
+}
+</h2>
+
+<p
+style={{
+color:
+"#93a0aa",
+margin:
+"0 0 25px",
+}}
+>
+Carica documenti,
+contratti,
+permessi,
+documenti personali
+e curriculum.
+</p>
+
+<div
+style={{
+display:
+"grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 16,
+}}
+>
 <div>
-<label>Dipendente</label>
+<label>
+Categoria documento
+</label>
 
 <select
-value={selectedEmployee}
+value={
+category
+}
 onChange={(e) =>
-setSelectedEmployee(
-e.target.value
+setCategory(
+e.target
+.value
 )
 }
 style={{
-width: "100%",
-padding: 14,
-marginTop: 7,
-borderRadius: 10,
+width:
+"100%",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
 border:
-"1px solid #394650",
+"1px solid #3b4955",
 background:
-"#111920",
-color: "#ffffff",
+"#17212b",
+color:
+"#ffffff",
 }}
 >
-<option value="">
+{documentCategories.map(
+(item) => (
+<option
+key={
+item.value
+}
+value={
+item.value
+}
+>
+{
+item.label
+}
+</option>
+)
+)}
+</select>
+</div>
+
+<div>
+<label>
+Tipo documento
+</label>
+
+<select
+value={
+documentType
+}
+onChange={(e) =>
+setDocumentType(
+e.target
+.value
+)
+}
+style={{
+width:
+"100%",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
+}}
+>
+{(
+documentTypes[
+category
+] || []
+).map(
+(item) => (
+<option
+key={
+item.value
+}
+value={
+item.value
+}
+>
+{
+item.label
+}
+</option>
+)
+)}
+</select>
+</div>
+
+{category ===
+"retribuzione" && (
+<div>
+<label>
+Mese
+</label>
+
+<select
+value={
+month
+}
+onChange={(e) =>
+setMonth(
+Number(
+e.target
+.value
+)
+)
+}
+style={{
+width:
+"100%",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
+}}
+>
+{months.map(
+(
+name,
+index
+) => (
+<option
+key={
+name
+}
+value={
+index +
+1
+}
+>
+{name}
+</option>
+)
+)}
+</select>
+</div>
+)}
+
+<div>
+<label>
+Anno
+</label>
+
+<input
+type="number"
+value={
+year
+}
+onChange={(e) =>
+setYear(
+Number(
+e.target
+.value
+)
+)
+}
+style={{
+width:
+"100%",
+boxSizing:
+"border-box",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
+}}
+/>
+</div>
+
+{requiresExpiration(
+documentType
+) && (
+<div>
+<label>
+Data di scadenza
+</label>
+
+<input
+type="date"
+value={
+expirationDate
+}
+onChange={(e) =>
+setExpirationDate(
+e.target
+.value
+)
+}
+style={{
+width:
+"100%",
+boxSizing:
+"border-box",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
+}}
+/>
+</div>
+)}
+
+{(documentType ===
+"driving_license" ||
+documentType ===
+"identity_card") && (
+<div>
+<label>
+Codice fiscale
+{documentType ===
+"driving_license" &&
+" *"}
+</label>
+
+<input
+type="text"
+value={
+fiscalCode
+}
+onChange={(e) =>
+setFiscalCode(
+e.target
+.value
+.toUpperCase()
+)
+}
+placeholder="Codice fiscale"
+maxLength={
+16
+}
+style={{
+width:
+"100%",
+boxSizing:
+"border-box",
+marginTop:
+7,
+padding:
+14,
+borderRadius:
+10,
+border:
+"1px solid #3b4955",
+background:
+"#17212b",
+color:
+"#ffffff",
+textTransform:
+"uppercase",
+}}
+/>
+
+<div
+style={{
+marginTop:
+5,
+color:
+"#82909b",
+fontSize:
+11,
+}}
+>
+{documentType ===
+"driving_license"
+? "Obbligatorio per la patente."
+: "Facoltativo: utile per la ricerca del dipendente."}
+</div>
+</div>
+)}
+</div>
+
+<div
+style={{
+marginTop:
+20,
+}}
+>
+<label>
+Documento PDF
+</label>
+
+<input
+id="document-file"
+type="file"
+accept="application/pdf,.pdf"
+onChange={(e) =>
+setFile(
+e.target
+.files?.[0] ||
+null
+)
+}
+style={{
+display:
+"block",
+marginTop:
+10,
+width:
+"100%",
+color:
+"#ffffff",
+}}
+/>
+</div>
+
+<button
+onClick={
+uploadDocument
+}
+disabled={
+submitting
+}
+style={{
+width:
+"100%",
+marginTop:
+25,
+padding:
+16,
+border:
+"none",
+borderRadius:
+12,
+background:
+"#16c784",
+color:
+"#062019",
+fontWeight:
+900,
+fontSize:
+16,
+cursor:
+"pointer",
+}}
+>
+{submitting
+? "Caricamento..."
+: "CARICA DOCUMENTO"}
+</button>
+
+{message && (
+<div
+style={{
+marginTop:
+18,
+padding:
+14,
+borderRadius:
+12,
+background:
+"#162d27",
+color:
+"#16c784",
+textAlign:
+"center",
+}}
+>
+{message}
+</div>
+)}
+</div>
+</div>
+</>
+)}
+
+<div
+style={{
+background:
+"#202b36",
+border:
+"1px solid #33404b",
+borderRadius:
+16,
+padding: 20,
+color:
+"#8998a4",
+}}
+>
+{adminLoading
+? "Caricamento dipendenti..."
+: `${employees.length} dipendenti attivi`}
+</div>
+</section>
+</main>
+);
+}
+
+return (
+<main
+style={{
+minHeight:
+"100vh",
+background:
+"#17202b",
+fontFamily:
+"Arial, sans-serif",
+color:
+"#ffffff",
+}}
+>
+<header
+style={{
+background:
+"#111923",
+borderBottom:
+"1px solid #293541",
+padding:
+"18px 28px",
+display: "flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+}}
+>
+<div>
+<strong
+style={{
+fontSize: 21,
+}}
+>
+BARDOC PAY
+</strong>
+
+<div
+style={{
+color:
+"#8998a4",
+fontSize: 13,
+}}
+>
+Area personale
+</div>
+</div>
+
+<button
+onClick={logout}
+style={{
+padding:
+"10px 17px",
+border:
+"1px solid #394652",
+borderRadius:
+10,
+background:
+"#1b2631",
+color:
+"#ffffff",
+fontWeight:
+700,
+cursor:
+"pointer",
+}}
+>
+Esci
+</button>
+</header>
+
+<section
+style={{
+maxWidth:
+1100,
+margin:
+"0 auto",
+padding: 30,
+}}
+>
+<div
+style={{
+background:
+"linear-gradient(135deg,#0d1824,#243442)",
+borderRadius:
+22,
+padding: 30,
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontWeight:
+800,
+fontSize: 13,
+}}
+>
+AREA PERSONALE
+</div>
+
+<h1
+style={{
+margin:
+"8px 0",
+}}
+>
+{employee?.full_name ||
+"Dipendente"}
+</h1>
+
+<p
+style={{
+margin: 0,
+color:
+"#aebbc4",
+}}
+>
+Benvenuto nel tuo
+portale BARDOC PAY.
+</p>
+</div>
+
+<div
+style={{
+display:
+"grid",
+gridTemplateColumns:
+"220px 1fr",
+gap: 20,
+marginTop: 20,
+}}
+>
+<div
+style={{
+background:
+"#202b36",
+border:
+"1px solid #33404b",
+borderRadius:
+20,
+padding: 22,
+textAlign:
+"center",
+}}
+>
+<div
+style={{
+width: 130,
+height: 130,
+margin:
+"0 auto",
+borderRadius:
+"50%",
+overflow:
+"hidden",
+background:
+"#111923",
+border:
+"3px solid #16c784",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
+}}
+>
+{employeePhotoUrl ? (
+<img
+src={
+employeePhotoUrl
+}
+alt="Foto"
+style={{
+width:
+"100%",
+height:
+"100%",
+objectFit:
+"cover",
+}}
+/>
+) : (
+<span
+style={{
+fontSize:
+45,
+fontWeight:
+900,
+color:
+"#16c784",
+}}
+>
+{employee?.full_name
+?.charAt(
+0
+)
+.toUpperCase()}
+</span>
+)}
+</div>
+
+<div
+style={{
+marginTop:
+15,
+fontWeight:
+800,
+}}
+>
+{employee?.full_name}
+</div>
+
+<div
+style={{
+marginTop:
+6,
+color:
+"#8998a4",
+fontSize:
+12,
+}}
+>
+{employee?.email}
+</div>
+</div>
+
+<div
+style={{
+background:
+"#202b36",
+border:
+"1px solid #33404b",
+borderRadius:
+20,
+padding: 25,
+}}
+>
+<h2
+style={{
+marginTop:
+0,
+}}
+>
+I miei documenti
+</h2>
+
+{documents.length ===
+0 ? (
+<p
+style={{
+color:
+"#8998a4",
+}}
+>
+Non sono presenti
+documenti.
+</p>
+) : (
+documents.map(
+(doc) => {
+const expired =
+isExpired(
+doc.expiration_date
+);
+
+const soon =
+isExpiringSoon(
+doc.expiration_date
+);
+
+return (
+<div
+key={
+doc.id
+}
+style={{
+padding:
+16,
+borderTop:
+"1px solid #33404b",
+}}
+>
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap: 15,
+}}
+>
+<div>
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+fontWeight:
+800,
+}}
+>
+{
+categoryLabel(
+doc.document_category
+)
+}
+</div>
+
+<strong
+style={{
+display:
+"block",
+marginTop:
+5,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</strong>
+
+<div
+style={{
+color:
+"#8998a4",
+fontSize:
+12,
+marginTop:
+5,
+}}
+>
+{
+doc.file_name
+}
+
+{doc.month &&
+` · ${months[
+doc.month -
+1
+]} ${doc.year}`}
+</div>
+
+{doc.expiration_date && (
+<div
+style={{
+marginTop:
+7,
+color:
+expired
+? "#ff6464"
+: soon
+? "#f4b942"
+: "#8998a4",
+fontSize:
+12,
+fontWeight:
+700,
+}}
+>
+{expired
+? "🚨 Documento scaduto"
+: soon
+? "⚠️ In scadenza entro 30 giorni"
+: `Scadenza: ${new Date(
+doc.expiration_date
+).toLocaleDateString(
+"it-IT"
+)}`}
+</div>
+)}
+</div>
+
+<button
+onClick={() =>
+openDocument(
+doc
+)
+}
+style={{
+background:
+"#16c784",
+border:
+"none",
+borderRadius:
+10,
+padding:
+"10px 16px",
+fontWeight:
+900,
+cursor:
+"pointer",
+whiteSpace:
+"nowrap",
+}}
+>
+Apri PDF
+</button>
+</div>
+</div>
+);
+}
+)
+)}
+</div>
+</div>
+
+<div
+style={{
+marginTop:
+20,
+padding: 18,
+background:
+"#202b36",
+borderRadius:
+16,
+color:
+"#8998a4",
+fontSize:
+13,
+}}
+>
+Accesso effettuato
+come{" "}
+<strong
+style={{
+color:
+"#ffffff",
+}}
+>
+{
+session.user
+.email
+}
+</strong>
+</div>
+</section>
+</main>
+);
+}
