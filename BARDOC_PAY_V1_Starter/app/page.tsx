@@ -3,10 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-/* =========================
-   TIPI
-========================= */
-
 type Employee = {
   id: string;
   auth_user_id: string | null;
@@ -27,6 +23,15 @@ type Document = {
   storage_path: string;
   tax_code: string | null;
   expiry_date: string | null;
+};
+
+type Communication = {
+  id: string;
+  employee_id: string | null;
+  title: string;
+  message: string;
+  is_general: boolean;
+  created_at: string;
 };
 
 type Communication = {
