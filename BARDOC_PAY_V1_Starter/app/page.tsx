@@ -13,8 +13,6 @@ auth_user_id: string | null;
 full_name: string;
 email: string | null;
 active: boolean;
-fiscal_code: string | null;
-photo_path: string | null;
 };
 
 type Document = {
@@ -38,19 +36,18 @@ is_general: boolean;
 created_at: string;
 };
 
-type AdminSection =
-| "dashboard"
-| "employees"
-| "payments"
-| "documents"
-| "communications"
-| "deadlines";
-
 /* =========================================================
-COSTANTI
+CONFIGURAZIONE
 ========================================================= */
 
 const ADMIN_EMAIL = "bardocfg@gmail.com";
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+const YEARS = Array.from(
+{ length: 8 },
+(_, i) => CURRENT_YEAR - 5 + i
+);
 
 const MONTHS = [
 "Gennaio",
@@ -67,53 +64,8 @@ const MONTHS = [
 "Dicembre",
 ];
 
-const CURRENT_YEAR = new Date().getFullYear();
-
-const YEARS = Array.from(
-{ length: 8 },
-(_, i) => CURRENT_YEAR - 5 + i
-);
-
-const DOCUMENT_TYPES: Record<
-string,
-{ value: string; label: string }[]
-> = {
-anagrafici: [
-{
-value: "id_card",
-label: "Documento d'identità",
-},
-{
-value: "driver_license",
-label: "Patente",
-},
-{
-value: "fiscal_code",
-label: "Codice fiscale",
-},
-{
-value: "curriculum",
-label: "Curriculum / CV",
-},
-],
-
-contrattuali: [
-{
-value: "work_contract",
-label: "Contratto di lavoro",
-},
-{
-value: "work_relationship",
-label: "Rapporto di lavoro",
-},
-{
-value: "leave_permit",
-label: "Permessi e assenze",
-},
-],
-};
-
-const PAYMENT_TYPES = [
+const DOCUMENT_TYPES = {
+retribuzione: [
 {
 value: "payslip",
 label: "Busta paga",
@@ -122,17 +74,55 @@ label: "Busta paga",
 value: "payment_statement",
 label: "Distinta di pagamento",
 },
-];
+],
+
+lavoro: [
+{
+value: "work_contract",
+label: "Contratto di lavoro",
+},
+],
+
+permessi: [
+{
+value: "leave_permit",
+label: "Foglio permesso / assenza",
+},
+],
+
+personali: [
+{
+value: "id_card",
+label: "Documento d'identità",
+},
+{
+value: "driver_license",
+label: "Patente",
+},
+],
+
+curriculum: [
+{
+value: "curriculum",
+label: "Curriculum / CV storico",
+},
+],
+};
+
+const CATEGORY_LABELS: Record<string, string> = {
+retribuzione: "Retribuzione",
+lavoro: "Rapporto di lavoro",
+permessi: "Permessi e assenze",
+personali: "Documenti personali",
+curriculum: "Curriculum",
+};
 
 /* =========================================================
-FUNZIONI UTILI
+FUNZIONI
 ========================================================= */
 
 function documentLabel(type: string) {
-const all = [
-...Object.values(DOCUMENT_TYPES).flat(),
-...PAYMENT_TYPES,
-];
+const all = Object.values(DOCUMENT_TYPES).flat();
 
 return (
 all.find((item) => item.value === type)?.label ||
@@ -145,7 +135,9 @@ if (!date) return "—";
 
 const parts = date.split("-");
 
-if (parts.length !== 3) return date;
+if (parts.length !== 3) {
+return date;
+}
 
 return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
@@ -170,22 +162,78 @@ if (!date) return "none";
 
 const days = daysUntil(date);
 
-if (days < 0) return "expired";
+if (days < 0) {
+return "expired";
+}
 
-if (days <= 30) return "warning";
+if (days <= 30) {
+return "warning";
+}
 
 return "valid";
 }
 
-function initials(name: string) {
-return name
-.split(" ")
-.filter(Boolean)
-.map((part) => part[0])
-.slice(0, 2)
-.join("")
-.toUpperCase();
+function formatCommunicationDate(
+value: string
+) {
+const date = new Date(value);
+
+return date.toLocaleString("it-IT", {
+day: "2-digit",
+month: "2-digit",
+year: "numeric",
+hour: "2-digit",
+minute: "2-digit",
+});
 }
+
+/* =========================================================
+STILI
+========================================================= */
+
+const darkInput: React.CSSProperties = {
+width: "100%",
+boxSizing: "border-box",
+padding: "13px 14px",
+borderRadius: 10,
+border: "1px solid #344955",
+background: "#101e28",
+color: "#fff",
+fontSize: 14,
+outline: "none",
+};
+
+const darkSelect: React.CSSProperties = {
+width: "100%",
+padding: 13,
+borderRadius: 9,
+border: "1px solid #344955",
+background: "#101e28",
+color: "#fff",
+boxSizing: "border-box",
+fontSize: 14,
+};
+
+const greenButton: React.CSSProperties = {
+width: "100%",
+padding: 14,
+border: "none",
+borderRadius: 10,
+background: "#16c784",
+color: "#062019",
+fontWeight: 900,
+cursor: "pointer",
+};
+
+const secondaryButton: React.CSSProperties = {
+padding: "11px 16px",
+border: "1px solid #344955",
+borderRadius: 9,
+background: "#13222c",
+color: "#dce6e9",
+fontWeight: 700,
+cursor: "pointer",
+};
 
 /* =========================================================
 HOME
@@ -228,11 +276,14 @@ useState<Document[]>([]);
 const [communications, setCommunications] =
 useState<Communication[]>([]);
 
+const [adminCommunications, setAdminCommunications] =
+useState<Communication[]>([]);
+
 const [adminLoading, setAdminLoading] =
 useState(false);
 
-const [adminSection, setAdminSection] =
-useState<AdminSection>("dashboard");
+const [activeSection, setActiveSection] =
+useState("dashboard");
 
 const [search, setSearch] =
 useState("");
@@ -240,19 +291,10 @@ useState("");
 const [selectedEmployee, setSelectedEmployee] =
 useState("");
 
-const [selectedEmployeeProfile, setSelectedEmployeeProfile] =
-useState<Employee | null>(null);
+const [category, setCategory] =
+useState("retribuzione");
 
-const [employeePhotoUrl, setEmployeePhotoUrl] =
-useState("");
-
-const [employeePhoto, setEmployeePhoto] =
-useState<File | null>(null);
-
-const [photoUploading, setPhotoUploading] =
-useState(false);
-
-const [paymentType, setPaymentType] =
+const [documentType, setDocumentType] =
 useState("payslip");
 
 const [month, setMonth] =
@@ -260,12 +302,6 @@ useState(new Date().getMonth() + 1);
 
 const [year, setYear] =
 useState(CURRENT_YEAR);
-
-const [documentCategory, setDocumentCategory] =
-useState("anagrafici");
-
-const [documentType, setDocumentType] =
-useState("id_card");
 
 const [taxCode, setTaxCode] =
 useState("");
@@ -287,16 +323,16 @@ useState("");
 const [communicationTitle, setCommunicationTitle] =
 useState("");
 
-const [communicationText, setCommunicationText] =
+const [communicationMessage, setCommunicationMessage] =
 useState("");
 
 const isAdmin =
 session?.user?.email?.toLowerCase() ===
 ADMIN_EMAIL.toLowerCase();
 
-/* =======================================================
-AUTENTICAZIONE
-======================================================= */
+/* =====================================================
+SESSIONE
+===================================================== */
 
 useEffect(() => {
 supabase.auth
@@ -320,9 +356,9 @@ return () =>
 subscription.unsubscribe();
 }, []);
 
-/* =======================================================
-CARICAMENTO DATI
-======================================================= */
+/* =====================================================
+CARICAMENTO AREA
+===================================================== */
 
 useEffect(() => {
 if (!session) return;
@@ -334,142 +370,9 @@ loadEmployeeArea();
 }
 }, [session, isAdmin]);
 
-async function loadAdminData() {
-setAdminLoading(true);
-
-const {
-data: employeeData,
-error: employeeError,
-} = await supabase
-.from("employees")
-.select("*")
-.eq("active", true)
-.order("full_name");
-
-if (employeeError) {
-console.error(employeeError);
-
-setMessage(
-"Impossibile caricare i dipendenti."
-);
-} else {
-setEmployees(
-employeeData || []
-);
-}
-
-const {
-data: documentData,
-error: documentError,
-} = await supabase
-.from("documents")
-.select("*")
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
-
-if (documentError) {
-console.error(documentError);
-} else {
-setAllDocuments(
-documentData || []
-);
-}
-
-const {
-data: communicationData,
-error: communicationError,
-} = await supabase
-.from("communications")
-.select("*")
-.order("created_at", {
-ascending: false,
-});
-
-if (communicationError) {
-console.warn(
-"Tabella communications non disponibile:",
-communicationError.message
-);
-} else {
-setCommunications(
-communicationData || []
-);
-}
-
-setAdminLoading(false);
-}
-
-async function loadEmployeeArea() {
-if (!session?.user?.id) return;
-
-const {
-data: emp,
-error: empError,
-} = await supabase
-.from("employees")
-.select("*")
-.eq(
-"auth_user_id",
-session.user.id
-)
-.maybeSingle();
-
-if (empError) {
-console.error(empError);
-return;
-}
-
-setEmployee(emp);
-
-if (!emp) return;
-
-const {
-data: docs,
-error: docsError,
-} = await supabase
-.from("documents")
-.select("*")
-.eq("employee_id", emp.id)
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
-
-if (docsError) {
-console.error(docsError);
-} else {
-setDocuments(docs || []);
-}
-
-const {
-data: communicationData,
-error: communicationError,
-} = await supabase
-.from("communications")
-.select("*")
-.or(
-`employee_id.eq.${emp.id},is_general.eq.true`
-)
-.order("created_at", {
-ascending: false,
-});
-
-if (!communicationError) {
-setCommunications(
-communicationData || []
-);
-}
-}
-
-/* =======================================================
+/* =====================================================
 LOGIN
-======================================================= */
+===================================================== */
 
 async function handleSubmit(
 e: React.FormEvent
@@ -481,12 +384,10 @@ setSubmitting(true);
 
 if (loginMode) {
 const { error } =
-await supabase.auth.signInWithPassword(
-{
+await supabase.auth.signInWithPassword({
 email,
 password,
-}
-);
+});
 
 if (error) {
 setMessage(
@@ -512,6 +413,10 @@ setMessage(
 setSubmitting(false);
 }
 
+/* =====================================================
+LOGOUT
+===================================================== */
+
 async function logout() {
 await supabase.auth.signOut();
 
@@ -521,191 +426,176 @@ setDocuments([]);
 setEmployees([]);
 setAllDocuments([]);
 setCommunications([]);
+setAdminCommunications([]);
+
 setEmail("");
 setPassword("");
 }
 
-/* =======================================================
-FOTO DIPENDENTE
-======================================================= */
+/* =====================================================
+AREA DIPENDENTE
+===================================================== */
 
-async function openEmployeeProfile(
-emp: Employee
-) {
-setSelectedEmployeeProfile(emp);
-setEmployeePhotoUrl("");
-setEmployeePhoto(null);
-setMessage("");
-
-if (!emp.photo_path) return;
-
-const { data, error } =
-await supabase.storage
-.from("employee-photos")
-.createSignedUrl(
-emp.photo_path,
-600
-);
-
-if (error) {
-console.error(error);
+async function loadEmployeeArea() {
+if (!session?.user?.id) {
 return;
 }
 
-if (data?.signedUrl) {
-setEmployeePhotoUrl(
-data.signedUrl
-);
-}
-}
-
-async function uploadEmployeePhoto() {
-if (!selectedEmployeeProfile) {
-setMessage(
-"Seleziona un dipendente."
-);
-return;
-}
-
-if (!employeePhoto) {
-setMessage(
-"Seleziona una foto."
-);
-return;
-}
-
-if (
-![
-"image/jpeg",
-"image/png",
-"image/webp",
-].includes(
-employeePhoto.type
+const { data: emp, error: empError } =
+await supabase
+.from("employees")
+.select("*")
+.eq(
+"auth_user_id",
+session.user.id
 )
-) {
-setMessage(
-"La foto deve essere JPG, PNG oppure WEBP."
-);
+.maybeSingle();
+
+if (empError) {
+console.error(empError);
 return;
 }
 
-if (
-employeePhoto.size >
-5 * 1024 * 1024
-) {
-setMessage(
-"La foto non può superare 5 MB."
-);
+setEmployee(emp);
+
+if (!emp) {
 return;
 }
 
-setPhotoUploading(true);
-setMessage("");
+const { data: docs } =
+await supabase
+.from("documents")
+.select("*")
+.eq("employee_id", emp.id)
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
 
-try {
-const extension =
-employeePhoto.type ===
-"image/png"
-? "png"
-: employeePhoto.type ===
-"image/webp"
-? "webp"
-: "jpg";
+setDocuments(docs || []);
 
-const storagePath =
-`${selectedEmployeeProfile.id}/${crypto.randomUUID()}.${extension}`;
+/*
+* SUPABASE RLS farà vedere:
+* - comunicazioni generali
+* - comunicazioni personali del dipendente
+*/
 
 const {
-error: uploadError,
-} = await supabase.storage
-.from("employee-photos")
-.upload(
-storagePath,
-employeePhoto,
-{
-upsert: false,
-contentType:
-employeePhoto.type,
+data: comms,
+error: commError,
+} = await supabase
+.from("communications")
+.select("*")
+.order("created_at", {
+ascending: false,
+});
+
+if (commError) {
+console.error(commError);
+return;
 }
+
+setCommunications(
+comms || []
 );
-
-if (uploadError) {
-throw uploadError;
 }
 
+/* =====================================================
+AREA ADMIN
+===================================================== */
+
+async function loadAdminData() {
+setAdminLoading(true);
+
 const {
-error: updateError,
+data: employeeData,
+error: employeeError,
 } = await supabase
 .from("employees")
-.update({
-photo_path:
-storagePath,
-})
-.eq(
-"id",
-selectedEmployeeProfile.id
-);
+.select("*")
+.eq("active", true)
+.order("full_name");
 
-if (updateError) {
-throw updateError;
+if (employeeError) {
+console.error(employeeError);
+
+setMessage(
+"Impossibile caricare i dipendenti."
+);
+} else {
+setEmployees(
+employeeData || []
+);
 }
 
-const updatedEmployee = {
-...selectedEmployeeProfile,
-photo_path:
-storagePath,
-};
+const { data: docs } =
+await supabase
+.from("documents")
+.select("*")
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
 
-setSelectedEmployeeProfile(
-updatedEmployee
-);
-
-setEmployees(
-(current) =>
-current.map((emp) =>
-emp.id ===
-updatedEmployee.id
-? updatedEmployee
-: emp
-)
+setAllDocuments(
+docs || []
 );
 
 const {
-data: signedData,
+data: comms,
+error: commError,
 } =
-await supabase.storage
-.from("employee-photos")
-.createSignedUrl(
-storagePath,
-600
-);
+await supabase
+.from("communications")
+.select("*")
+.order("created_at", {
+ascending: false,
+});
 
-if (signedData?.signedUrl) {
-setEmployeePhotoUrl(
-signedData.signedUrl
-);
-}
-
-setEmployeePhoto(null);
-
-setMessage(
-"Foto caricata correttamente. ✅"
-);
-} catch (error: any) {
-console.error(error);
-
-setMessage(
-error?.message ||
-"Errore durante il caricamento della foto."
+if (commError) {
+console.error(commError);
+} else {
+setAdminCommunications(
+comms || []
 );
 }
 
-setPhotoUploading(false);
+setAdminLoading(false);
 }
 
-/* =======================================================
-UPLOAD DOCUMENTI GENERALI
-======================================================= */
+/* =====================================================
+RESET DOCUMENTO
+===================================================== */
+
+function resetDocumentForm() {
+setSelectedEmployee("");
+setCategory("retribuzione");
+setDocumentType("payslip");
+setMonth(
+new Date().getMonth() + 1
+);
+setYear(CURRENT_YEAR);
+setTaxCode("");
+setExpiryDate("");
+setFile(null);
+
+const input =
+document.getElementById(
+"document-file"
+) as HTMLInputElement | null;
+
+if (input) {
+input.value = "";
+}
+}
+
+/* =====================================================
+UPLOAD DOCUMENTO
+===================================================== */
 
 async function uploadDocument() {
 setMessage("");
@@ -751,9 +641,18 @@ setMessage(
 return;
 }
 
-if (
+const requiresTaxCode =
 documentType ===
-"driver_license" &&
+"driver_license";
+
+const allowsExpiry =
+documentType ===
+"id_card" ||
+documentType ===
+"driver_license";
+
+if (
+requiresTaxCode &&
 !normalizedTaxCode
 ) {
 setMessage(
@@ -763,10 +662,7 @@ return;
 }
 
 if (
-(documentType ===
-"id_card" ||
-documentType ===
-"driver_license") &&
+allowsExpiry &&
 !expiryDate
 ) {
 setMessage(
@@ -794,7 +690,8 @@ const storagePath =
 
 const {
 error: uploadError,
-} = await supabase.storage
+} =
+await supabase.storage
 .from(
 "payroll-documents"
 )
@@ -812,26 +709,43 @@ if (uploadError) {
 throw uploadError;
 }
 
+const isPayroll =
+documentType ===
+"payslip" ||
+documentType ===
+"payment_statement";
+
 const {
 error: documentError,
-} = await supabase
+} =
+await supabase
 .from("documents")
 .insert({
 employee_id:
 selectedEmployee,
+
 document_type:
 documentType,
-month: null,
+
+month: isPayroll
+? month
+: null,
+
 year,
+
 file_name:
 file.name,
+
 storage_path:
 storagePath,
+
 tax_code:
 normalizedTaxCode ||
 null,
+
 expiry_date:
-expiryDate || null,
+expiryDate ||
+null,
 });
 
 if (documentError) {
@@ -857,172 +771,9 @@ error?.message ||
 setSubmitting(false);
 }
 
-/* =======================================================
-UPLOAD BUSTE PAGA / DISTINTE
-======================================================= */
-
-async function uploadPayment() {
-setMessage("");
-
-if (!selectedEmployee) {
-setMessage(
-"Seleziona un dipendente."
-);
-return;
-}
-
-if (!file) {
-setMessage(
-"Seleziona una busta paga o distinta in PDF."
-);
-return;
-}
-
-if (
-file.type !==
-"application/pdf"
-) {
-setMessage(
-"Il documento deve essere un PDF."
-);
-return;
-}
-
-setSubmitting(true);
-
-try {
-const safeFileName =
-file.name
-.replace(
-/[^\w.\- ]/g,
-""
-)
-.replace(
-/\s+/g,
-"_"
-);
-
-const storagePath =
-`${selectedEmployee}/${Date.now()}_${safeFileName}`;
-
-const {
-error: uploadError,
-} = await supabase.storage
-.from(
-"payroll-documents"
-)
-.upload(
-storagePath,
-file,
-{
-upsert: false,
-contentType:
-"application/pdf",
-}
-);
-
-if (uploadError) {
-throw uploadError;
-}
-
-const {
-error: documentError,
-} = await supabase
-.from("documents")
-.insert({
-employee_id:
-selectedEmployee,
-
-document_type:
-paymentType,
-
-month,
-
-year,
-
-file_name:
-file.name,
-
-storage_path:
-storagePath,
-
-tax_code: null,
-
-expiry_date:
-null,
-});
-
-if (documentError) {
-throw documentError;
-}
-
-setMessage(
-paymentType ===
-"payslip"
-? "Busta paga caricata correttamente. ✅"
-: "Distinta di pagamento caricata correttamente. ✅"
-);
-
-resetPaymentForm();
-
-await loadAdminData();
-} catch (error: any) {
-console.error(error);
-
-setMessage(
-error?.message ||
-"Errore durante il caricamento."
-);
-}
-
-setSubmitting(false);
-}
-
-function resetDocumentForm() {
-setSelectedEmployee("");
-setDocumentCategory(
-"anagrafici"
-);
-setDocumentType(
-"id_card"
-);
-setYear(CURRENT_YEAR);
-setTaxCode("");
-setExpiryDate("");
-setFile(null);
-
-const input =
-document.getElementById(
-"document-file"
-) as HTMLInputElement | null;
-
-if (input) {
-input.value = "";
-}
-}
-
-function resetPaymentForm() {
-setSelectedEmployee("");
-setPaymentType("payslip");
-setMonth(
-new Date().getMonth() + 1
-);
-setYear(CURRENT_YEAR);
-setFile(null);
-
-const input =
-document.getElementById(
-"payment-file"
-) as HTMLInputElement | null;
-
-if (input) {
-input.value = "";
-}
-}
-
-/* =======================================================
-APERTURA DOCUMENTO
-======================================================= */
+/* =====================================================
+APRI DOCUMENTO
+===================================================== */
 
 async function openDocument(
 doc: Document
@@ -1030,7 +781,8 @@ doc: Document
 const {
 data,
 error,
-} = await supabase.storage
+} =
+await supabase.storage
 .from(
 "payroll-documents"
 )
@@ -1057,9 +809,9 @@ data.signedUrl,
 }
 }
 
-/* =======================================================
-COMUNICAZIONI
-======================================================= */
+/* =====================================================
+INVIA COMUNICAZIONE
+===================================================== */
 
 async function sendCommunication() {
 setMessage("");
@@ -1068,7 +820,7 @@ const title =
 communicationTitle.trim();
 
 const text =
-communicationText.trim();
+communicationMessage.trim();
 
 if (!title) {
 setMessage(
@@ -1100,7 +852,8 @@ setSubmitting(true);
 try {
 const {
 error,
-} = await supabase
+} =
+await supabase
 .from(
 "communications"
 )
@@ -1124,16 +877,24 @@ if (error) {
 throw error;
 }
 
-setMessage(
-communicationMode ===
-"individual"
-? "Comunicazione inviata al dipendente. ✅"
-: "Comunicazione generale inviata a tutti i dipendenti. ✅"
+setCommunicationTitle(
+""
 );
 
-setCommunicationTitle("");
-setCommunicationText("");
-setCommunicationEmployee("");
+setCommunicationMessage(
+""
+);
+
+setCommunicationEmployee(
+""
+);
+
+setMessage(
+communicationMode ===
+"general"
+? "Comunicazione generale inviata a tutti i dipendenti. ✅"
+: "Comunicazione inviata al dipendente selezionato. ✅"
+);
 
 await loadAdminData();
 } catch (error: any) {
@@ -1148,9 +909,9 @@ error?.message ||
 setSubmitting(false);
 }
 
-/* =======================================================
-RICERCA
-======================================================= */
+/* =====================================================
+FILTRO DIPENDENTI
+===================================================== */
 
 const filteredEmployees =
 useMemo(() => {
@@ -1163,9 +924,25 @@ if (!q) {
 return employees;
 }
 
+const employeeIdsByTaxCode =
+new Set(
+allDocuments
+.filter((doc) =>
+(
+doc.tax_code ||
+""
+)
+.toLowerCase()
+.includes(q)
+)
+.map(
+(doc) =>
+doc.employee_id
+)
+);
+
 return employees.filter(
-(emp) => {
-return (
+(emp) =>
 emp.full_name
 .toLowerCase()
 .includes(q) ||
@@ -1174,23 +951,19 @@ emp.email || ""
 )
 .toLowerCase()
 .includes(q) ||
-(
-emp.fiscal_code ||
-""
+employeeIdsByTaxCode.has(
+emp.id
 )
-.toLowerCase()
-.includes(q)
-);
-}
 );
 }, [
 search,
 employees,
+allDocuments,
 ]);
 
-/* =======================================================
-FILTRI PAGAMENTI
-======================================================= */
+/* =====================================================
+PAGAMENTI
+===================================================== */
 
 const payslips =
 useMemo(
@@ -1214,9 +987,9 @@ doc.document_type ===
 [allDocuments]
 );
 
-/* =======================================================
+/* =====================================================
 SCADENZE
-======================================================= */
+===================================================== */
 
 const expiringDocuments =
 useMemo(() => {
@@ -1234,8 +1007,7 @@ doc.employee_id
 ({ doc }) =>
 expiryStatus(
 doc.expiry_date
-) ===
-"warning"
+) === "warning"
 );
 }, [
 allDocuments,
@@ -1258,17 +1030,16 @@ doc.employee_id
 ({ doc }) =>
 expiryStatus(
 doc.expiry_date
-) ===
-"expired"
+) === "expired"
 );
 }, [
 allDocuments,
 employees,
 ]);
 
-/* =======================================================
+/* =====================================================
 LOADING
-======================================================= */
+===================================================== */
 
 if (loading) {
 return (
@@ -1310,11 +1081,12 @@ alignItems:
 "center",
 justifyContent:
 "center",
-fontSize: 44,
-fontWeight:
-900,
+fontSize: 45,
+fontWeight: 900,
 margin:
 "0 auto 18px",
+boxShadow:
+"0 0 40px rgba(22,199,132,.25)",
 }}
 >
 B
@@ -1324,355 +1096,28 @@ B
 style={{
 color:
 "#b8c5cb",
+fontSize: 15,
 }}
 >
-Caricamento
-BARDOC PAY...
+Caricamento BARDOC PAY...
 </div>
 </div>
 </div>
 );
 }
 
-/* =======================================================
+/* =====================================================
 LOGIN
-======================================================= */
+===================================================== */
 
 if (!session) {
-return (
-<LoginPage
-email={email}
-password={password}
-setEmail={setEmail}
-setPassword={setPassword}
-loginMode={loginMode}
-setLoginMode={
-setLoginMode
-}
-submitting={
-submitting
-}
-message={
-message
-}
-handleSubmit={
-handleSubmit
-}
-/>
-);
-}
-
-/* =======================================================
-AMMINISTRATORE
-======================================================= */
-
-if (isAdmin) {
-return (
-<AdminDashboard
-section={
-adminSection
-}
-setSection={
-setAdminSection
-}
-
-employees={
-filteredEmployees
-}
-
-allEmployees={
-employees
-}
-
-documents={
-allDocuments
-}
-
-payslips={
-payslips
-}
-
-paymentStatements={
-paymentStatements
-}
-
-communications={
-communications
-}
-
-search={
-search
-}
-
-setSearch={
-setSearch
-}
-
-selectedEmployee={
-selectedEmployee
-}
-
-setSelectedEmployee={
-setSelectedEmployee
-}
-
-selectedEmployeeProfile={
-selectedEmployeeProfile
-}
-
-setSelectedEmployeeProfile={
-setSelectedEmployeeProfile
-}
-
-employeePhotoUrl={
-employeePhotoUrl
-}
-
-employeePhoto={
-employeePhoto
-}
-
-setEmployeePhoto={
-setEmployeePhoto
-}
-
-photoUploading={
-photoUploading
-}
-
-uploadEmployeePhoto={
-uploadEmployeePhoto
-}
-
-openEmployeeProfile={
-openEmployeeProfile
-}
-
-paymentType={
-paymentType
-}
-
-setPaymentType={
-setPaymentType
-}
-
-month={
-month
-}
-
-setMonth={
-setMonth
-}
-
-year={
-year
-}
-
-setYear={
-setYear
-}
-
-documentCategory={
-documentCategory
-}
-
-setDocumentCategory={(
-value: string
-) => {
-setDocumentCategory(
-value
-);
-
-const first =
-DOCUMENT_TYPES[
-value
-]?.[0];
-
-setDocumentType(
-first?.value ||
-"id_card"
-);
-
-setTaxCode("");
-setExpiryDate("");
-}}
-
-documentType={
-documentType
-}
-
-setDocumentType={(
-value: string
-) => {
-setDocumentType(
-value
-);
-
-if (
-value !==
-"driver_license" &&
-value !==
-"id_card"
-) {
-setExpiryDate("");
-}
-
-setTaxCode("");
-}}
-
-taxCode={
-taxCode
-}
-
-setTaxCode={
-setTaxCode
-}
-
-expiryDate={
-expiryDate
-}
-
-setExpiryDate={
-setExpiryDate
-}
-
-file={
-file
-}
-
-setFile={
-setFile
-}
-
-submitting={
-submitting
-}
-
-message={
-message
-}
-
-setMessage={
-setMessage
-}
-
-uploadDocument={
-uploadDocument
-}
-
-uploadPayment={
-uploadPayment
-}
-
-openDocument={
-openDocument
-}
-
-logout={
-logout
-}
-
-adminLoading={
-adminLoading
-}
-
-expiringDocuments={
-expiringDocuments
-}
-
-expiredDocuments={
-expiredDocuments
-}
-
-communicationMode={
-communicationMode
-}
-
-setCommunicationMode={
-setCommunicationMode
-}
-
-communicationEmployee={
-communicationEmployee
-}
-
-setCommunicationEmployee={
-setCommunicationEmployee
-}
-
-communicationTitle={
-communicationTitle
-}
-
-setCommunicationTitle={
-setCommunicationTitle
-}
-
-communicationText={
-communicationText
-}
-
-setCommunicationText={
-setCommunicationText
-}
-
-sendCommunication={
-sendCommunication
-}
-/>
-);
-}
-
-/* =======================================================
-AREA DIPENDENTE
-======================================================= */
-
-return (
-<EmployeeArea
-employee={
-employee
-}
-documents={
-documents
-}
-communications={
-communications
-}
-openDocument={
-openDocument
-}
-logout={
-logout
-}
-session={
-session
-}
-/>
-);
-}
-
-/* =========================================================
-LOGIN PAGE
-========================================================= */
-
-function LoginPage({
-email,
-password,
-setEmail,
-setPassword,
-loginMode,
-setLoginMode,
-submitting,
-message,
-handleSubmit,
-}: any) {
 return (
 <main
 style={{
 minHeight:
 "100vh",
 background:
-"radial-gradient(circle at top,#12323c 0%,#07141f 55%,#03080d 100%)",
+"linear-gradient(135deg,#050b12,#0d202c,#07141f)",
 display:
 "flex",
 alignItems:
@@ -1688,18 +1133,17 @@ fontFamily:
 style={{
 width:
 "100%",
-maxWidth:
-460,
+maxWidth: 450,
 background:
-"rgba(15,28,38,.96)",
+"#111e28",
 border:
-"1px solid #2b404b",
+"1px solid #2a3b47",
 borderRadius:
 26,
 padding:
 40,
 boxShadow:
-"0 30px 90px rgba(0,0,0,.55)",
+"0 30px 90px rgba(0,0,0,.45)",
 color:
 "#fff",
 }}
@@ -1712,30 +1156,26 @@ textAlign:
 >
 <div
 style={{
-width: 105,
-height: 105,
+width: 100,
+height: 100,
 margin:
 "0 auto 18px",
 borderRadius:
-"50%",
-border:
-"2px solid #16c784",
+26,
 background:
-"linear-gradient(145deg,#16c784,#0b6650)",
+"linear-gradient(135deg,#16c784,#61f3c1)",
 color:
-"#041711",
+"#062019",
 display:
 "flex",
 alignItems:
 "center",
 justifyContent:
 "center",
-fontSize:
-62,
-fontWeight:
-900,
+fontSize: 58,
+fontWeight: 900,
 boxShadow:
-"0 0 35px rgba(22,199,132,.25)",
+"0 0 45px rgba(22,199,132,.25)",
 }}
 >
 B
@@ -1745,12 +1185,11 @@ B
 style={{
 color:
 "#16c784",
-fontSize:
-13,
 fontWeight:
 900,
 letterSpacing:
 2,
+fontSize: 13,
 }}
 >
 BARDOC SERVICE
@@ -1759,7 +1198,7 @@ BARDOC SERVICE
 <h1
 style={{
 margin:
-"10px 0 5px",
+"8px 0 5px",
 fontSize:
 30,
 }}
@@ -1770,12 +1209,14 @@ BARDOC PAY
 <p
 style={{
 color:
-"#95a6af",
+"#9daab2",
 margin:
 "0 0 28px",
+fontSize:
+14,
 }}
 >
-Portale del personale
+Portale digitale del personale
 </p>
 </div>
 
@@ -1799,8 +1240,7 @@ email
 }
 onChange={(e) =>
 setEmail(
-e.target
-.value
+e.target.value
 )
 }
 required
@@ -1817,8 +1257,7 @@ password
 }
 onChange={(e) =>
 setPassword(
-e.target
-.value
+e.target.value
 )
 }
 required
@@ -1832,9 +1271,13 @@ type="submit"
 disabled={
 submitting
 }
-style={
-greenButton
-}
+style={{
+...greenButton,
+opacity:
+submitting
+? 0.6
+: 1,
+}}
 >
 {submitting
 ? "ATTENDERE..."
@@ -1850,6 +1293,7 @@ onClick={() => {
 setLoginMode(
 !loginMode
 );
+setMessage("");
 }}
 style={{
 width:
@@ -1863,7 +1307,7 @@ background:
 color:
 "#16c784",
 fontWeight:
-800,
+700,
 cursor:
 "pointer",
 }}
@@ -1900,13 +1344,201 @@ fontSize:
 );
 }
 
+/* =====================================================
+AREA ADMIN
+===================================================== */
+
+if (isAdmin) {
+return (
+<AdminDashboard
+activeSection={
+activeSection
+}
+setActiveSection={
+setActiveSection
+}
+employees={
+filteredEmployees
+}
+allEmployees={
+employees
+}
+documents={
+allDocuments
+}
+payslips={
+payslips
+}
+paymentStatements={
+paymentStatements
+}
+communications={
+adminCommunications
+}
+search={
+search
+}
+setSearch={
+setSearch
+}
+selectedEmployee={
+selectedEmployee
+}
+setSelectedEmployee={
+setSelectedEmployee
+}
+category={
+category
+}
+setCategory={(value) => {
+setCategory(value);
+
+const first =
+(
+DOCUMENT_TYPES as any
+)[value]?.[0];
+
+setDocumentType(
+first?.value ||
+"payslip"
+);
+
+setTaxCode("");
+setExpiryDate("");
+}}
+documentType={
+documentType
+}
+setDocumentType={
+(value) => {
+setDocumentType(
+value
+);
+
+setTaxCode("");
+setExpiryDate("");
+}
+}
+month={
+month
+}
+setMonth={
+setMonth
+}
+year={
+year
+}
+setYear={
+setYear
+}
+taxCode={
+taxCode
+}
+setTaxCode={
+setTaxCode
+}
+expiryDate={
+expiryDate
+}
+setExpiryDate={
+setExpiryDate
+}
+file={
+file
+}
+setFile={
+setFile
+}
+submitting={
+submitting
+}
+message={
+message
+}
+uploadDocument={
+uploadDocument
+}
+openDocument={
+openDocument
+}
+logout={
+logout
+}
+adminLoading={
+adminLoading
+}
+expiringDocuments={
+expiringDocuments
+}
+expiredDocuments={
+expiredDocuments
+}
+communicationMode={
+communicationMode
+}
+setCommunicationMode={
+setCommunicationMode
+}
+communicationEmployee={
+communicationEmployee
+}
+setCommunicationEmployee={
+setCommunicationEmployee
+}
+communicationTitle={
+communicationTitle
+}
+setCommunicationTitle={
+setCommunicationTitle
+}
+communicationMessage={
+communicationMessage
+}
+setCommunicationMessage={
+setCommunicationMessage
+}
+sendCommunication={
+sendCommunication
+}
+/>
+);
+}
+
+/* =====================================================
+AREA DIPENDENTE
+===================================================== */
+
+return (
+<EmployeeArea
+employee={
+employee
+}
+documents={
+documents
+}
+communications={
+communications
+}
+openDocument={
+openDocument
+}
+logout={
+logout
+}
+session={
+session
+}
+/>
+);
+}
+
 /* =========================================================
-DASHBOARD AMMINISTRATORE
+ADMIN DASHBOARD
 ========================================================= */
 
 function AdminDashboard({
-section,
-setSection,
+activeSection,
+setActiveSection,
 employees,
 allEmployees,
 documents,
@@ -1917,24 +1549,14 @@ search,
 setSearch,
 selectedEmployee,
 setSelectedEmployee,
-selectedEmployeeProfile,
-setSelectedEmployeeProfile,
-employeePhotoUrl,
-employeePhoto,
-setEmployeePhoto,
-photoUploading,
-uploadEmployeePhoto,
-openEmployeeProfile,
-paymentType,
-setPaymentType,
+category,
+setCategory,
+documentType,
+setDocumentType,
 month,
 setMonth,
 year,
 setYear,
-documentCategory,
-setDocumentCategory,
-documentType,
-setDocumentType,
 taxCode,
 setTaxCode,
 expiryDate,
@@ -1943,9 +1565,7 @@ file,
 setFile,
 submitting,
 message,
-setMessage,
 uploadDocument,
-uploadPayment,
 openDocument,
 logout,
 adminLoading,
@@ -1957,10 +1577,28 @@ communicationEmployee,
 setCommunicationEmployee,
 communicationTitle,
 setCommunicationTitle,
-communicationText,
-setCommunicationText,
+communicationMessage,
+setCommunicationMessage,
 sendCommunication,
 }: any) {
+const isPayroll =
+category ===
+"retribuzione";
+
+const isPersonal =
+category ===
+"personali";
+
+const requiresTaxCode =
+documentType ===
+"driver_license";
+
+const allowsExpiry =
+documentType ===
+"id_card" ||
+documentType ===
+"driver_license";
+
 return (
 <main
 style={{
@@ -1976,7 +1614,9 @@ display:
 "flex",
 }}
 >
-{/* SIDEBAR */}
+{/* =================================================
+SIDEBAR
+================================================= */}
 
 <aside
 style={{
@@ -1998,18 +1638,8 @@ flexShrink:
 >
 <div
 style={{
-paddingBottom:
-20,
-borderBottom:
-"1px solid #20313b",
-marginBottom:
-20,
-}}
->
-<div
-style={{
 fontSize:
-21,
+20,
 fontWeight:
 900,
 }}
@@ -2034,113 +1664,114 @@ fontSize:
 fontWeight:
 800,
 marginTop:
-5,
+4,
+marginBottom:
+28,
 }}
 >
 AMMINISTRAZIONE
 </div>
-</div>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "dashboard"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "dashboard"
 )
 }
 >
-⌂ Dashboard
+🏠 Dashboard
 </SidebarButton>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "employees"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "employees"
 )
 }
 >
-♙ Dipendenti
+👥 Dipendenti
 </SidebarButton>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "payments"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "payments"
 )
 }
 >
-€ Gestione pagamenti
+💰 Gestione pagamenti
 </SidebarButton>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "documents"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "documents"
 )
 }
 >
-▣ Documenti
+📁 Documenti
 </SidebarButton>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "communications"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "communications"
 )
 }
 >
-✉ Comunicazioni
+💬 Comunicazioni
 </SidebarButton>
 
 <SidebarButton
 active={
-section ===
+activeSection ===
 "deadlines"
 }
 onClick={() =>
-setSection(
+setActiveSection(
 "deadlines"
 )
 }
 >
-◷ Scadenze
+⚠️ Scadenze
 </SidebarButton>
 
 <div
 style={{
-flex:
+height:
 1,
-minHeight:
-40,
+background:
+"#20313b",
+margin:
+"25px 0",
 }}
 />
 
 <div
 style={{
 color:
-"#6f8089",
+"#73838c",
 fontSize:
-11,
-marginBottom:
 12,
 }}
 >
@@ -2160,29 +1791,20 @@ onClick={
 logout
 }
 style={{
+...secondaryButton,
 width:
 "100%",
-padding:
-12,
-border:
-"1px solid #30424d",
-borderRadius:
-9,
-background:
-"#13222c",
-color:
-"#dce6e9",
-fontWeight:
-800,
-cursor:
-"pointer",
+marginTop:
+20,
 }}
 >
 Esci
 </button>
 </aside>
 
-{/* CONTENUTO */}
+{/* =================================================
+CONTENUTO
+================================================= */}
 
 <section
 style={{
@@ -2192,304 +1814,128 @@ padding:
 28,
 boxSizing:
 "border-box",
-maxWidth:
-1600,
-overflowX:
+overflow:
 "auto",
 }}
 >
-{/* DASHBOARD */}
+{/* ===============================================
+HEADER
+=============================================== */}
 
-{section ===
+<header
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+marginBottom:
+24,
+gap:
+20,
+}}
+>
+<div>
+<h1
+style={{
+margin:
+0,
+fontSize:
+27,
+}}
+>
+{activeSection ===
+"dashboard"
+? "Dashboard"
+: activeSection ===
+"employees"
+? "Dipendenti"
+: activeSection ===
+"payments"
+? "Gestione pagamenti"
+: activeSection ===
+"documents"
+? "Documenti"
+: activeSection ===
+"communications"
+? "Comunicazioni"
+: "Scadenze"}
+</h1>
+
+<div
+style={{
+color:
+"#82919a",
+marginTop:
+5,
+fontSize:
+13,
+}}
+>
+Gestione del personale BARDOC SERVICE
+</div>
+</div>
+</header>
+
+{/* =================================================
+DASHBOARD
+================================================= */}
+
+{activeSection ===
 "dashboard" && (
-<DashboardHome
-allEmployees={
-allEmployees
-}
-documents={
-documents
-}
-expiringDocuments={
-expiringDocuments
-}
-expiredDocuments={
-expiredDocuments
-}
-setSection={
-setSection
-}
-/>
-)}
-
-{/* DIPENDENTI */}
-
-{section ===
-"employees" && (
-<EmployeesSection
-employees={
-employees
-}
-allEmployees={
-allEmployees
-}
-search={
-search
-}
-setSearch={
-setSearch
-}
-selectedEmployeeProfile={
-selectedEmployeeProfile
-}
-setSelectedEmployeeProfile={
-setSelectedEmployeeProfile
-}
-employeePhotoUrl={
-employeePhotoUrl
-}
-employeePhoto={
-employeePhoto
-}
-setEmployeePhoto={
-setEmployeePhoto
-}
-photoUploading={
-photoUploading
-}
-uploadEmployeePhoto={
-uploadEmployeePhoto
-}
-openEmployeeProfile={
-openEmployeeProfile
-}
-documents={
-documents
-}
-openDocument={
-openDocument
-}
-adminLoading={
-adminLoading
-}
-setSection={
-setSection
-}
-/>
-)}
-
-{/* GESTIONE PAGAMENTI */}
-
-{section ===
-"payments" && (
-<PaymentsSection
-employees={
-allEmployees
-}
-documents={
-documents
-}
-payslips={
-payslips
-}
-paymentStatements={
-paymentStatements
-}
-selectedEmployee={
-selectedEmployee
-}
-setSelectedEmployee={
-setSelectedEmployee
-}
-paymentType={
-paymentType
-}
-setPaymentType={
-setPaymentType
-}
-month={
-month
-}
-setMonth={
-setMonth
-}
-year={
-year
-}
-setYear={
-setYear
-}
-file={
-file
-}
-setFile={
-setFile
-}
-submitting={
-submitting
-}
-message={
-message
-}
-uploadPayment={
-uploadPayment
-}
-openDocument={
-openDocument
-}
-setMessage={
-setMessage
-}
-/>
-)}
-
-{/* DOCUMENTI */}
-
-{section ===
-"documents" && (
-<DocumentsSection
-employees={
-allEmployees
-}
-selectedEmployee={
-selectedEmployee
-}
-setSelectedEmployee={
-setSelectedEmployee
-}
-documentCategory={
-documentCategory
-}
-setDocumentCategory={
-setDocumentCategory
-}
-documentType={
-documentType
-}
-setDocumentType={
-setDocumentType
-}
-taxCode={
-taxCode
-}
-setTaxCode={
-setTaxCode
-}
-expiryDate={
-expiryDate
-}
-setExpiryDate={
-setExpiryDate
-}
-year={
-year
-}
-setYear={
-setYear
-}
-file={
-file
-}
-setFile={
-setFile
-}
-submitting={
-submitting
-}
-message={
-message
-}
-uploadDocument={
-uploadDocument
-}
-/>
-)}
-
-{/* COMUNICAZIONI */}
-
-{section ===
-"communications" && (
-<CommunicationsSection
-employees={
-allEmployees
-}
-communications={
-communications
-}
-communicationMode={
-communicationMode
-}
-setCommunicationMode={
-setCommunicationMode
-}
-communicationEmployee={
-communicationEmployee
-}
-setCommunicationEmployee={
-setCommunicationEmployee
-}
-communicationTitle={
-communicationTitle
-}
-setCommunicationTitle={
-setCommunicationTitle
-}
-communicationText={
-communicationText
-}
-setCommunicationText={
-setCommunicationText
-}
-submitting={
-submitting
-}
-message={
-message
-}
-sendCommunication={
-sendCommunication
-}
-/>
-)}
-
-{/* SCADENZE */}
-
-{section ===
-"deadlines" && (
-<DeadlinesSection
-expiringDocuments={
-expiringDocuments
-}
-expiredDocuments={
-expiredDocuments
-}
-openDocument={
-openDocument
-}
-/>
-)}
-</section>
-</main>
-);
-}
-
-/* =========================================================
-DASHBOARD HOME
-========================================================= */
-
-function DashboardHome({
-allEmployees,
-documents,
-expiringDocuments,
-expiredDocuments,
-setSection,
-}: any) {
-return (
 <>
-<PageHeader
-eyebrow="AMMINISTRAZIONE"
-title="Dashboard"
-subtitle="Gestione completa del personale BARDOC SERVICE."
-/>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius:
+20,
+padding:
+28,
+marginBottom:
+20,
+border:
+"1px solid #263b47",
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+fontWeight:
+900,
+}}
+>
+AMMINISTRAZIONE
+</div>
+
+<h2
+style={{
+margin:
+"8px 0",
+fontSize:
+29,
+}}
+>
+Benvenuto in BARDOC PAY
+</h2>
+
+<p
+style={{
+color:
+"#a9b8c0",
+margin:
+0,
+}}
+>
+Da qui puoi gestire dipendenti,
+pagamenti, documenti,
+comunicazioni e scadenze.
+</p>
+</div>
 
 <div
 style={{
@@ -2511,26 +1957,24 @@ allEmployees.length
 />
 
 <Stat
-title="Documenti totali"
+title="Documenti"
 value={
 documents.length
 }
 />
 
 <Stat
-title="In scadenza"
+title="Buste paga"
 value={
-expiringDocuments.length
+payslips.length
 }
-alert
 />
 
 <Stat
-title="Scaduti"
+title="Comunicazioni"
 value={
-expiredDocuments.length
+communications.length
 }
-danger
 />
 </div>
 
@@ -2541,15 +1985,15 @@ display:
 gridTemplateColumns:
 "repeat(2,minmax(0,1fr))",
 gap:
-18,
+16,
 }}
 >
 <QuickCard
 title="Gestione pagamenti"
-text="Carica e consulta buste paga e distinte di pagamento."
+description="Carica e consulta buste paga e distinte di pagamento."
 button="Apri gestione pagamenti"
 onClick={() =>
-setSection(
+setActiveSection(
 "payments"
 )
 }
@@ -2557,10 +2001,10 @@ setSection(
 
 <QuickCard
 title="Documenti"
-text="Gestisci documenti anagrafici e rapporto contrattuale."
+description="Gestisci documenti anagrafici e rapporto contrattuale."
 button="Apri documenti"
 onClick={() =>
-setSection(
+setActiveSection(
 "documents"
 )
 }
@@ -2568,10 +2012,10 @@ setSection(
 
 <QuickCard
 title="Comunicazioni"
-text="Invia comunicazioni individuali oppure comunicazioni generali."
+description="Invia messaggi individuali oppure comunicazioni generali."
 button="Apri comunicazioni"
 onClick={() =>
-setSection(
+setActiveSection(
 "communications"
 )
 }
@@ -2579,152 +2023,134 @@ setSection(
 
 <QuickCard
 title="Scadenze"
-text="Controlla documenti in scadenza e documenti già scaduti."
+description="Controlla documenti in scadenza e già scaduti."
 button="Controlla scadenze"
 onClick={() =>
-setSection(
+setActiveSection(
 "deadlines"
 )
 }
 />
 </div>
 </>
-);
-}
+)}
 
-/* =========================================================
+{/* =================================================
 DIPENDENTI
-========================================================= */
+================================================= */}
 
-function EmployeesSection({
-employees,
-allEmployees,
-search,
-setSearch,
-selectedEmployeeProfile,
-setSelectedEmployeeProfile,
-employeePhotoUrl,
-employeePhoto,
-setEmployeePhoto,
-photoUploading,
-uploadEmployeePhoto,
-openEmployeeProfile,
-documents,
-openDocument,
-adminLoading,
-setSection,
-}: any) {
-return (
-<>
-<PageHeader
-eyebrow="PERSONALE"
-title="Dipendenti"
-subtitle="Cerca e gestisci il fascicolo digitale del personale."
-/>
-
-{!selectedEmployeeProfile ? (
+{activeSection ===
+"employees" && (
 <div
-style={
-panelStyle
-}
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+}}
 >
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+marginBottom:
+18,
+}}
+>
+<div>
+<h2
+style={{
+margin:
+0,
+}}
+>
+Gestione dipendenti
+</h2>
+
+<div
+style={{
+color:
+"#82919a",
+fontSize:
+13,
+marginTop:
+5,
+}}
+>
+Cerca per nome, email o codice fiscale.
+</div>
+</div>
+
 <input
 value={
 search
 }
 onChange={(e) =>
 setSearch(
-e.target
-.value
+e.target.value
 )
 }
-placeholder="Cerca nome, email o codice fiscale..."
+placeholder="Cerca dipendente..."
 style={{
 ...darkInput,
-marginBottom:
-18,
+maxWidth:
+360,
 }}
 />
+</div>
 
 {adminLoading ? (
-<EmptyState text="Caricamento dipendenti..." />
-) : employees.length ===
-0 ? (
-<EmptyState text="Nessun dipendente trovato." />
+<div
+style={{
+color:
+"#8999a2",
+}}
+>
+Caricamento...
+</div>
 ) : (
 employees.map(
-(emp: Employee) => (
-<button
+(
+emp: Employee
+) => {
+const employeeDocs =
+documents.filter(
+(
+doc: Document
+) =>
+doc.employee_id ===
+emp.id
+);
+
+return (
+<div
 key={
 emp.id
 }
-onClick={() =>
-openEmployeeProfile(
-emp
-)
-}
 style={{
-width:
-"100%",
-display:
-"flex",
-alignItems:
-"center",
-gap:
-14,
+borderTop:
+"1px solid #263841",
 padding:
-15,
-marginBottom:
-10,
-border:
-"1px solid #2d414c",
-borderRadius:
-13,
-background:
-"#101e28",
-color:
-"#fff",
-cursor:
-"pointer",
-textAlign:
-"left",
-}}
->
-<div
-style={{
-width:
-52,
-height:
-52,
-borderRadius:
-"50%",
-background:
-"#16c784",
-color:
-"#062019",
+"15px 0",
 display:
 "flex",
+justifyContent:
+"space-between",
 alignItems:
 "center",
-justifyContent:
-"center",
-fontWeight:
-900,
-flexShrink:
-0,
 }}
 >
-{initials(
-emp.full_name
-)}
-</div>
-
-<div
-style={{
-flex:
-1,
-}}
->
+<div>
 <strong>
 {
 emp.full_name
@@ -2734,7 +2160,7 @@ emp.full_name
 <div
 style={{
 color:
-"#7f919b",
+"#778993",
 fontSize:
 12,
 marginTop:
@@ -2744,24 +2170,6 @@ marginTop:
 {emp.email ||
 "Nessuna email"}
 </div>
-
-{emp.fiscal_code && (
-<div
-style={{
-color:
-"#7f919b",
-fontSize:
-11,
-marginTop:
-3,
-}}
->
-CF:{" "}
-{
-emp.fiscal_code
-}
-</div>
-)}
 </div>
 
 <span
@@ -2769,396 +2177,64 @@ style={{
 color:
 "#16c784",
 fontSize:
-11,
-fontWeight:
-900,
-}}
->
-● ATTIVO
-</span>
-</button>
-)
-)
-)}
-
-<div
-style={{
-marginTop:
-15,
-color:
-"#748690",
-fontSize:
-12,
-}}
->
-{allEmployees.length} dipendenti attivi
-</div>
-</div>
-) : (
-<div
-style={
-panelStyle
-}
->
-<button
-onClick={() =>
-setSelectedEmployeeProfile(
-null
-)
-}
-style={
-backButton
-}
->
-← Torna ai dipendenti
-</button>
-
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"260px minmax(0,1fr)",
-gap:
-24,
-}}
->
-<div
-style={{
-...panelStyle,
-textAlign:
-"center",
-margin:
-0,
-}}
->
-{employeePhotoUrl ? (
-<img
-src={
-employeePhotoUrl
-}
-alt={
-selectedEmployeeProfile.full_name
-}
-style={{
-width:
-175,
-height:
-175,
-objectFit:
-"cover",
-borderRadius:
-"50%",
-border:
-"4px solid #16c784",
-display:
-"block",
-margin:
-"0 auto 18px",
-}}
-/>
-) : (
-<div
-style={{
-width:
-175,
-height:
-175,
-borderRadius:
-"50%",
-background:
-"#16c784",
-color:
-"#062019",
-display:
-"flex",
-alignItems:
-"center",
-justifyContent:
-"center",
-fontSize:
-55,
-fontWeight:
-900,
-margin:
-"0 auto 18px",
-}}
->
-{initials(
-selectedEmployeeProfile.full_name
-)}
-</div>
-)}
-
-<strong
-style={{
-fontSize:
-18,
-}}
->
-{
-selectedEmployeeProfile.full_name
-}
-</strong>
-
-<div
-style={{
-color:
-"#16c784",
-fontSize:
 12,
 fontWeight:
 800,
-marginTop:
-8,
-}}
->
-● ATTIVO
-</div>
-
-<label
-style={{
-display:
-"block",
-marginTop:
-22,
-padding:
-12,
-background:
-"#16c784",
-color:
-"#062019",
-borderRadius:
-9,
-fontWeight:
-900,
-cursor:
-"pointer",
-}}
->
-📷 Carica / cambia foto
-
-<input
-type="file"
-accept="image/jpeg,image/png,image/webp"
-onChange={(e) =>
-setEmployeePhoto(
-e.target
-.files?.[0] ||
-null
-)
-}
-style={{
-display:
-"none",
-}}
-/>
-</label>
-
-{employeePhoto && (
-<button
-onClick={
-uploadEmployeePhoto
-}
-disabled={
-photoUploading
-}
-style={{
-width:
-"100%",
-marginTop:
-10,
-padding:
-11,
-border:
-"1px solid #16c784",
-borderRadius:
-9,
-background:
-"transparent",
-color:
-"#16c784",
-fontWeight:
-900,
-cursor:
-"pointer",
-}}
->
-{photoUploading
-? "CARICAMENTO..."
-: "SALVA FOTO"}
-</button>
-)}
-</div>
-
-<div>
-<h2
-style={{
-marginTop:
-0,
 }}
 >
 {
-selectedEmployeeProfile.full_name
-}
-</h2>
-
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"repeat(3,minmax(0,1fr))",
-gap:
-12,
-}}
->
-<InfoCard
-title="Email"
-value={
-selectedEmployeeProfile.email ||
-"—"
-}
-/>
-
-<InfoCard
-title="Codice fiscale"
-value={
-selectedEmployeeProfile.fiscal_code ||
-"—"
-}
-/>
-
-<InfoCard
-title="Stato"
-value="● Attivo"
-green
-/>
+employeeDocs.length
+}{" "}
+documenti
+</span>
 </div>
-
-<h3
-style={{
-marginTop:
-28,
-}}
->
-📁 Fascicolo digitale
-</h3>
-
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"repeat(2,minmax(0,1fr))",
-gap:
-12,
-}}
->
-<QuickCard
-title="Gestione pagamenti"
-text="Buste paga e distinte di pagamento."
-button="Gestisci"
-onClick={() =>
-setSection(
-"payments"
-)
-}
-/>
-
-<QuickCard
-title="Documenti"
-text="Documenti anagrafici e contrattuali."
-button="Gestisci"
-onClick={() =>
-setSection(
-"documents"
-)
-}
-/>
-</div>
-
-<h3
-style={{
-marginTop:
-28,
-}}
->
-Documenti presenti
-</h3>
-
-{documents.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeProfile.id
-).length ===
-0 ? (
-<EmptyState text="Nessun documento presente." />
-) : (
-documents
-.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeProfile.id
-)
-.slice(0, 10)
-.map(
-(
-doc: Document
-) => (
-<DocumentRow
-key={
-doc.id
-}
-doc={
-doc
-}
-openDocument={
-openDocument
-}
-/>
-)
-)
-)}
-</div>
-</div>
-</div>
-)}
-</>
 );
 }
+)
+)}
+</div>
+)}
 
-/* =========================================================
+{/* =================================================
 GESTIONE PAGAMENTI
-========================================================= */
+================================================= */}
 
-function PaymentsSection({
-employees,
-documents,
-payslips,
-paymentStatements,
-selectedEmployee,
-setSelectedEmployee,
-paymentType,
-setPaymentType,
-month,
-setMonth,
-year,
-setYear,
-file,
-setFile,
-submitting,
-message,
-uploadPayment,
-openDocument,
-}: any) {
-return (
+{activeSection ===
+"payments" && (
 <>
-<PageHeader
-eyebrow="PAGAMENTI"
-title="Gestione pagamenti"
-subtitle="Gestisci buste paga e distinte di pagamento del personale."
-/>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius:
+18,
+padding:
+24,
+marginBottom:
+18,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 7px",
+}}
+>
+Gestione pagamenti
+</h2>
+
+<p
+style={{
+margin:
+0,
+color:
+"#a9b8c0",
+}}
+>
+Gestisci buste paga e distinte di pagamento
+dei dipendenti.
+</p>
+</div>
 
 <div
 style={{
@@ -3188,49 +2264,46 @@ paymentStatements.length
 </div>
 
 <div
-style={
-panelStyle
-}
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+24,
+}}
 >
-<h2
+<h3
 style={{
 marginTop:
 0,
 }}
 >
 Carica documento di pagamento
-</h2>
-
-<p
-style={{
-color:
-"#81919a",
-fontSize:
-13,
-}}
->
-Seleziona il dipendente e scegli se caricare una busta paga oppure una distinta di pagamento.
-</p>
+</h3>
 
 <div
 style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(2,minmax(0,1fr))",
+"1fr 1fr",
 gap:
 16,
 }}
 >
-<Field label="Dipendente">
+<Field
+label="Dipendente"
+>
 <select
 value={
 selectedEmployee
 }
 onChange={(e) =>
 setSelectedEmployee(
-e.target
-.value
+e.target.value
 )
 }
 style={
@@ -3241,7 +2314,7 @@ darkSelect
 Seleziona dipendente
 </option>
 
-{employees.map(
+{allEmployees.map(
 (
 emp: Employee
 ) => (
@@ -3262,41 +2335,73 @@ emp.full_name
 </select>
 </Field>
 
-<Field label="Tipo pagamento">
+<Field
+label="Tipo"
+>
 <select
 value={
-paymentType
+documentType ===
+"payment_statement"
+? "payment_statement"
+: "payslip"
 }
 onChange={(e) =>
-setPaymentType(
-e.target
-.value
+setDocumentType(
+e.target.value
 )
 }
 style={
 darkSelect
 }
 >
-{PAYMENT_TYPES.map(
-(item) => (
-<option
-key={
-item.value
-}
+<option value="payslip">
+Busta paga
+</option>
+
+<option value="payment_statement">
+Distinta di pagamento
+</option>
+</select>
+</Field>
+
+<Field
+label="Anno"
+>
+<select
 value={
-item.value
+year
+}
+onChange={(e) =>
+setYear(
+Number(
+e.target.value
+)
+)
+}
+style={
+darkSelect
 }
 >
-{
-item.label
+{YEARS.map(
+(y) => (
+<option
+key={
+y
 }
+value={
+y
+}
+>
+{y}
 </option>
 )
 )}
 </select>
 </Field>
 
-<Field label="Mese">
+<Field
+label="Mese"
+>
 <select
 value={
 month
@@ -3304,8 +2409,7 @@ month
 onChange={(e) =>
 setMonth(
 Number(
-e.target
-.value
+e.target.value
 )
 )
 }
@@ -3333,51 +2437,18 @@ index +
 )}
 </select>
 </Field>
-
-<Field label="Anno">
-<select
-value={
-year
-}
-onChange={(e) =>
-setYear(
-Number(
-e.target
-.value
-)
-)
-}
-style={
-darkSelect
-}
->
-{YEARS.map(
-(y) => (
-<option
-key={
-y
-}
-value={
-y
-}
->
-{y}
-</option>
-)
-)}
-</select>
-</Field>
 </div>
 
-<Field label="Documento PDF">
+<Field
+label="PDF"
+>
 <input
-id="payment-file"
+id="document-file"
 type="file"
 accept="application/pdf,.pdf"
 onChange={(e) =>
 setFile(
-e.target
-.files?.[0] ||
+e.target.files?.[0] ||
 null
 )
 }
@@ -3392,7 +2463,7 @@ color:
 
 <button
 onClick={
-uploadPayment
+uploadDocument
 }
 disabled={
 submitting
@@ -3405,155 +2476,69 @@ marginTop:
 >
 {submitting
 ? "CARICAMENTO..."
-: paymentType ===
-"payslip"
-? "CARICA BUSTA PAGA"
-: "CARICA DISTINTA DI PAGAMENTO"}
+: "CARICA DOCUMENTO"}
 </button>
 
 {message && (
-<MessageBox
-message={
+<Message
+text={
 message
 }
 />
 )}
 </div>
 
-<div
-style={
-panelStyle
+<DocumentList
+title="Buste paga caricate"
+documents={
+payslips
 }
->
-<h2
-style={{
-marginTop:
-0,
-}}
->
-Buste paga
-</h2>
-
-{payslips.length ===
-0 ? (
-<EmptyState text="Nessuna busta paga caricata." />
-) : (
-payslips.map(
-(
-doc: Document
-) => (
-<DocumentRow
-key={
-doc.id
-}
-doc={
-doc
+employees={
+allEmployees
 }
 openDocument={
 openDocument
 }
 />
-)
-)
-)}
-</div>
 
-<div
-style={
-panelStyle
+<DocumentList
+title="Distinte di pagamento caricate"
+documents={
+paymentStatements
 }
->
-<h2
-style={{
-marginTop:
-0,
-}}
->
-Distinte di pagamento
-</h2>
-
-{paymentStatements.length ===
-0 ? (
-<EmptyState text="Nessuna distinta di pagamento caricata." />
-) : (
-paymentStatements.map(
-(
-doc: Document
-) => (
-<DocumentRow
-key={
-doc.id
-}
-doc={
-doc
+employees={
+allEmployees
 }
 openDocument={
 openDocument
 }
 />
-)
-)
-)}
-</div>
 </>
-);
-}
+)}
 
-/* =========================================================
+{/* =================================================
 DOCUMENTI
-========================================================= */
+================================================= */}
 
-function DocumentsSection({
-employees,
-selectedEmployee,
-setSelectedEmployee,
-documentCategory,
-setDocumentCategory,
-documentType,
-setDocumentType,
-taxCode,
-setTaxCode,
-expiryDate,
-setExpiryDate,
-year,
-setYear,
-file,
-setFile,
-submitting,
-message,
-uploadDocument,
-}: any) {
-const isPersonal =
-documentCategory ===
-"anagrafici";
-
-const requiresTaxCode =
-documentType ===
-"driver_license";
-
-const allowsExpiry =
-documentType ===
-"id_card" ||
-documentType ===
-"driver_license";
-
-return (
+{activeSection ===
+"documents" && (
 <>
-<PageHeader
-eyebrow="DOCUMENTI"
-title="Documenti"
-subtitle="Caricamento dei documenti anagrafici e del rapporto contrattuale."
-/>
-
 <div
-style={
-panelStyle
-}
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+24,
+}}
 >
 <h2
 style={{
-marginTop:
-0,
+margin:
+"0 0 6px",
 }}
 >
 Carica documento
@@ -3561,13 +2546,16 @@ Carica documento
 
 <p
 style={{
+margin:
+"0 0 10px",
 color:
-"#81919a",
+"#82919a",
 fontSize:
 13,
 }}
 >
-Tutta la documentazione del dipendente viene archiviata nel suo fascicolo digitale.
+Caricamento documenti anagrafici,
+contrattuali, permessi e curriculum.
 </p>
 
 <div
@@ -3575,20 +2563,21 @@ style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(2,minmax(0,1fr))",
+"1fr 1fr",
 gap:
 16,
 }}
 >
-<Field label="Dipendente">
+<Field
+label="Dipendente"
+>
 <select
 value={
 selectedEmployee
 }
 onChange={(e) =>
 setSelectedEmployee(
-e.target
-.value
+e.target.value
 )
 }
 style={
@@ -3599,7 +2588,7 @@ darkSelect
 Seleziona dipendente
 </option>
 
-{employees.map(
+{allEmployees.map(
 (
 emp: Employee
 ) => (
@@ -3620,40 +2609,54 @@ emp.full_name
 </select>
 </Field>
 
-<Field label="Categoria">
+<Field
+label="Categoria"
+>
 <select
 value={
-documentCategory
+category
 }
 onChange={(e) =>
-setDocumentCategory(
-e.target
-.value
+setCategory(
+e.target.value
 )
 }
 style={
 darkSelect
 }
 >
-<option value="anagrafici">
-Documenti anagrafici
+{Object.entries(
+CATEGORY_LABELS
+).map(
+([
+value,
+label,
+]) => (
+<option
+key={
+value
+}
+value={
+value
+}
+>
+{label}
 </option>
-
-<option value="contrattuali">
-Rapporto contrattuale
-</option>
+)
+)}
 </select>
 </Field>
 
-<Field label="Tipo documento">
+<Field
+label="Tipo documento"
+>
 <select
 value={
 documentType
 }
 onChange={(e) =>
 setDocumentType(
-e.target
-.value
+e.target.value
 )
 }
 style={
@@ -3661,11 +2664,14 @@ darkSelect
 }
 >
 {(
-DOCUMENT_TYPES[
-documentCategory
-] || []
+(
+DOCUMENT_TYPES as any
+)[category] ||
+[]
 ).map(
-(item) => (
+(
+item: any
+) => (
 <option
 key={
 item.value
@@ -3683,7 +2689,9 @@ item.label
 </select>
 </Field>
 
-<Field label="Anno">
+<Field
+label="Anno"
+>
 <select
 value={
 year
@@ -3691,8 +2699,7 @@ year
 onChange={(e) =>
 setYear(
 Number(
-e.target
-.value
+e.target.value
 )
 )
 }
@@ -3731,8 +2738,7 @@ taxCode
 }
 onChange={(e) =>
 setTaxCode(
-e.target
-.value
+e.target.value
 .toUpperCase()
 )
 }
@@ -3747,12 +2753,12 @@ darkInput
 
 <small
 style={{
-display:
-"block",
 color:
 "#71828c",
+display:
+"block",
 marginTop:
-5,
+6,
 }}
 >
 {requiresTaxCode
@@ -3763,7 +2769,9 @@ marginTop:
 )}
 
 {allowsExpiry && (
-<Field label="Data di scadenza">
+<Field
+label="Data di scadenza"
+>
 <input
 type="date"
 value={
@@ -3771,8 +2779,7 @@ expiryDate
 }
 onChange={(e) =>
 setExpiryDate(
-e.target
-.value
+e.target.value
 )
 }
 style={
@@ -3783,15 +2790,16 @@ darkInput
 )}
 </div>
 
-<Field label="Documento PDF">
+<Field
+label="Documento PDF"
+>
 <input
 id="document-file"
 type="file"
 accept="application/pdf,.pdf"
 onChange={(e) =>
 setFile(
-e.target
-.files?.[0] ||
+e.target.files?.[0] ||
 null
 )
 }
@@ -3823,52 +2831,92 @@ marginTop:
 </button>
 
 {message && (
-<MessageBox
-message={
+<Message
+text={
 message
 }
 />
 )}
 </div>
 </>
-);
-}
+)}
 
-/* =========================================================
+{/* =================================================
 COMUNICAZIONI
-========================================================= */
+================================================= */}
 
-function CommunicationsSection({
-employees,
-communications,
-communicationMode,
-setCommunicationMode,
-communicationEmployee,
-setCommunicationEmployee,
-communicationTitle,
-setCommunicationTitle,
-communicationText,
-setCommunicationText,
-submitting,
-message,
-sendCommunication,
-}: any) {
-return (
+{activeSection ===
+"communications" && (
 <>
-<PageHeader
-eyebrow="COMUNICAZIONI"
-title="Comunicazioni"
-subtitle="Invia messaggi individuali oppure comunicazioni generali a tutto il personale."
-/>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius:
+18,
+padding:
+24,
+marginBottom:
+18,
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+fontWeight:
+900,
+}}
+>
+COMUNICAZIONI
+</div>
 
+<h2
+style={{
+margin:
+"8px 0",
+}}
+>
+Comunicazioni al personale
+</h2>
+
+<p
+style={{
+margin:
+0,
+color:
+"#a9b8c0",
+}}
+>
+Invia comunicazioni private a un dipendente
+oppure messaggi generali a tutto il personale.
+</p>
+</div>
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+24,
+marginBottom:
+20,
+}}
+>
 <div
 style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(2,minmax(0,1fr))",
+"1fr 1fr",
 gap:
-16,
+12,
 marginBottom:
 20,
 }}
@@ -3881,53 +2929,28 @@ setCommunicationMode(
 }
 style={{
 padding:
-22,
-borderRadius:
 15,
+borderRadius:
+10,
 border:
 communicationMode ===
 "individual"
 ? "2px solid #16c784"
-: "1px solid #293c47",
+: "1px solid #344955",
 background:
-"#172630",
+communicationMode ===
+"individual"
+? "#12342d"
+: "#101e28",
 color:
 "#fff",
-textAlign:
-"left",
+fontWeight:
+800,
 cursor:
 "pointer",
 }}
 >
-<div
-style={{
-color:
-"#16c784",
-fontSize:
-24,
-marginBottom:
-8,
-}}
->
-👤
-</div>
-
-<strong>
-Comunicazione individuale
-</strong>
-
-<div
-style={{
-color:
-"#81919a",
-fontSize:
-12,
-marginTop:
-6,
-}}
->
-Messaggio destinato a un singolo dipendente.
-</div>
+👤 Comunicazione individuale
 </button>
 
 <button
@@ -3938,81 +2961,43 @@ setCommunicationMode(
 }
 style={{
 padding:
-22,
-borderRadius:
 15,
+borderRadius:
+10,
 border:
 communicationMode ===
 "general"
 ? "2px solid #16c784"
-: "1px solid #293c47",
+: "1px solid #344955",
 background:
-"#172630",
+communicationMode ===
+"general"
+? "#12342d"
+: "#101e28",
 color:
 "#fff",
-textAlign:
-"left",
+fontWeight:
+800,
 cursor:
 "pointer",
 }}
 >
-<div
-style={{
-color:
-"#16c784",
-fontSize:
-24,
-marginBottom:
-8,
-}}
->
-📢
-</div>
-
-<strong>
-Comunicazione generale
-</strong>
-
-<div
-style={{
-color:
-"#81919a",
-fontSize:
-12,
-marginTop:
-6,
-}}
->
-Messaggio inviato a tutti i dipendenti.
-</div>
+📢 Comunicazione generale
 </button>
 </div>
 
-<div
-style={
-panelStyle
-}
->
-<h2
-style={{
-marginTop:
-0,
-}}
->
-Nuova comunicazione
-</h2>
-
 {communicationMode ===
 "individual" && (
-<Field label="Dipendente destinatario">
+<Field
+label="Dipendente destinatario"
+>
 <select
 value={
 communicationEmployee
 }
 onChange={(e) =>
 setCommunicationEmployee(
-e.target
-.value
+e.target.value
 )
 }
 style={
@@ -4023,7 +3008,7 @@ darkSelect
 Seleziona dipendente
 </option>
 
-{employees.map(
+{allEmployees.map(
 (
 emp: Employee
 ) => (
@@ -4045,41 +3030,70 @@ emp.full_name
 </Field>
 )}
 
-<Field label="Titolo">
+{communicationMode ===
+"general" && (
+<div
+style={{
+padding:
+14,
+borderRadius:
+10,
+background:
+"#263a43",
+color:
+"#c7d5da",
+marginBottom:
+17,
+fontSize:
+13,
+}}
+>
+📢 Questa comunicazione sarà visibile
+a tutti i dipendenti.
+</div>
+)}
+
+<Field
+label="Titolo"
+>
 <input
 value={
 communicationTitle
 }
 onChange={(e) =>
 setCommunicationTitle(
-e.target
-.value
+e.target.value
 )
 }
-placeholder="Titolo della comunicazione"
+placeholder="Es. Comunicazione importante"
 style={
 darkInput
 }
 />
 </Field>
 
-<Field label="Messaggio">
+<Field
+label="Messaggio"
+>
 <textarea
 value={
-communicationText
+communicationMessage
 }
 onChange={(e) =>
-setCommunicationText(
-e.target
-.value
+setCommunicationMessage(
+e.target.value
 )
 }
 placeholder="Scrivi qui la comunicazione..."
-rows={7}
+rows={
+7
+}
 style={{
 ...darkInput,
 resize:
 "vertical",
+fontFamily:
+"Arial, sans-serif",
 }}
 />
 </Field>
@@ -4100,14 +3114,14 @@ marginTop:
 {submitting
 ? "INVIO..."
 : communicationMode ===
-"individual"
-? "INVIA AL DIPENDENTE"
-: "INVIA A TUTTI I DIPENDENTI"}
+"general"
+? "INVIA A TUTTI I DIPENDENTI"
+: "INVIA AL DIPENDENTE"}
 </button>
 
 {message && (
-<MessageBox
-message={
+<Message
+text={
 message
 }
 />
@@ -4115,38 +3129,64 @@ message
 </div>
 
 <div
-style={
-panelStyle
-}
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+}}
 >
-<h2
+<h3
 style={{
 marginTop:
 0,
 }}
 >
-Comunicazioni recenti
-</h2>
+Storico comunicazioni
+</h3>
 
 {communications.length ===
 0 ? (
-<EmptyState text="Nessuna comunicazione presente." />
+<div
+style={{
+color:
+"#82919a",
+}}
+>
+Nessuna comunicazione presente.
+</div>
 ) : (
-communications
-.slice(0, 20)
-.map(
+communications.map(
 (
-communication: Communication
-) => (
+comm: Communication
+) => {
+const target =
+comm.is_general
+? "Tutti i dipendenti"
+: allEmployees.find(
+(
+emp: Employee
+) =>
+emp.id ===
+comm.employee_id
+)
+?.full_name ||
+"Dipendente";
+
+return (
 <div
 key={
-communication.id
+comm.id
 }
 style={{
 borderTop:
-"1px solid #293c47",
+"1px solid #263841",
 padding:
-"15px 0",
+"16px 0",
 }}
 >
 <div
@@ -4156,79 +3196,87 @@ display:
 justifyContent:
 "space-between",
 gap:
-12,
+15,
 }}
 >
+<div>
 <strong>
 {
-communication.title
+comm.title
 }
 </strong>
 
-<span
+<div
 style={{
 color:
 "#16c784",
 fontSize:
-11,
-fontWeight:
-800,
+12,
+marginTop:
+5,
 }}
 >
-{communication.is_general
-? "GENERALE"
-: "INDIVIDUALE"}
+{comm.is_general
+? "📢 "
+: "👤 "}
+{
+target
+}
+</div>
+</div>
+
+<span
+style={{
+color:
+"#71828c",
+fontSize:
+11,
+}}
+>
+{formatCommunicationDate(
+comm.created_at
+)}
 </span>
 </div>
 
 <div
 style={{
 color:
-"#81919a",
-fontSize:
-13,
+"#b7c4ca",
 marginTop:
-6,
+10,
 whiteSpace:
 "pre-wrap",
+lineHeight:
+1.5,
 }}
 >
 {
-communication.message
+comm.message
 }
 </div>
 </div>
-)
+);
+}
 )
 )}
 </div>
 </>
-);
-}
+)}
 
-/* =========================================================
+{/* =================================================
 SCADENZE
-========================================================= */
+================================================= */}
 
-function DeadlinesSection({
-expiringDocuments,
-expiredDocuments,
-openDocument,
-}: any) {
-return (
+{activeSection ===
+"deadlines" && (
 <>
-<PageHeader
-eyebrow="CONTROLLO"
-title="Scadenze"
-subtitle="Controlla documenti prossimi alla scadenza e documenti già scaduti."
-/>
-
 <div
 style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(2,minmax(0,1fr))",
+"1fr 1fr",
 gap:
 16,
 marginBottom:
@@ -4236,7 +3284,7 @@ marginBottom:
 }}
 >
 <Stat
-title="In scadenza entro 30 giorni"
+title="Documenti in scadenza"
 value={
 expiringDocuments.length
 }
@@ -4252,96 +3300,516 @@ danger
 />
 </div>
 
-<div
-style={
-panelStyle
+<DeadlineList
+title="Documenti scaduti"
+items={
+expiredDocuments
 }
->
-<h2
-style={{
-marginTop:
-0,
-}}
->
-🚨 Documenti in scadenza
-</h2>
-
-{expiringDocuments.length ===
-0 ? (
-<EmptyState text="Nessun documento in scadenza nei prossimi 30 giorni." />
-) : (
-expiringDocuments.map(
-({
-doc,
-employee,
-}: any) => (
-<DeadlineRow
-key={
-doc.id
-}
-doc={
-doc
-}
-employee={
-employee
-}
-openDocument={
-openDocument
-}
-expired={
-false
-}
+danger
 />
-)
-)
-)}
-</div>
 
-<div
-style={
-panelStyle
+<DeadlineList
+title="Documenti in scadenza entro 30 giorni"
+items={
+expiringDocuments
 }
->
-<h2
-style={{
-marginTop:
-0,
-}}
->
-❌ Documenti scaduti
-</h2>
-
-{expiredDocuments.length ===
-0 ? (
-<EmptyState text="Nessun documento scaduto." />
-) : (
-expiredDocuments.map(
-({
-doc,
-employee,
-}: any) => (
-<DeadlineRow
-key={
-doc.id
-}
-doc={
-doc
-}
-employee={
-employee
-}
-openDocument={
-openDocument
-}
-expired={
-true
-}
+alert
 />
-)
-)
-)}
-</div>
 </>
+)}
+</section>
+</main>
+);
+}
+
+/* =========================================================
+SIDEBAR BUTTON
+========================================================= */
+
+function SidebarButton({
+active,
+onClick,
+children,
+}: any) {
+return (
+<button
+onClick={
+onClick
+}
+style={{
+width:
+"100%",
+textAlign:
+"left",
+padding:
+"13px 12px",
+border:
+"none",
+borderRadius:
+9,
+marginBottom:
+5,
+background:
+active
+? "#12332d"
+: "transparent",
+color:
+active
+? "#16c784"
+: "#a9b7be",
+fontWeight:
+active
+? 800
+: 600,
+cursor:
+"pointer",
+}}
+>
+{children}
+</button>
+);
+}
+
+/* =========================================================
+STAT
+========================================================= */
+
+function Stat({
+title,
+value,
+alert,
+danger,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+14,
+padding:
+20,
+}}
+>
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginBottom:
+10,
+}}
+>
+{title}
+</div>
+
+<div
+style={{
+fontSize:
+29,
+fontWeight:
+900,
+color:
+danger
+? "#ff7777"
+: alert
+? "#ffc857"
+: "#f2f6f7",
+}}
+>
+{value}
+</div>
+</div>
+);
+}
+
+/* =========================================================
+QUICK CARD
+========================================================= */
+
+function QuickCard({
+title,
+description,
+button,
+onClick,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+}}
+>
+<h3
+style={{
+margin:
+"0 0 8px",
+}}
+>
+{title}
+</h3>
+
+<p
+style={{
+color:
+"#82919a",
+fontSize:
+13,
+lineHeight:
+1.5,
+minHeight:
+40,
+}}
+>
+{description}
+</p>
+
+<button
+onClick={
+onClick
+}
+style={{
+...greenButton,
+marginTop:
+8,
+}}
+>
+{button}
+</button>
+</div>
+);
+}
+
+/* =========================================================
+FIELD
+========================================================= */
+
+function Field({
+label,
+children,
+}: any) {
+return (
+<div
+style={{
+marginTop:
+17,
+}}
+>
+<label
+style={{
+display:
+"block",
+color:
+"#aebbc2",
+fontSize:
+12,
+fontWeight:
+700,
+marginBottom:
+7,
+}}
+>
+{label}
+</label>
+
+{children}
+</div>
+);
+}
+
+/* =========================================================
+MESSAGE
+========================================================= */
+
+function Message({
+text,
+}: {
+text: string;
+}) {
+return (
+<div
+style={{
+marginTop:
+15,
+padding:
+13,
+borderRadius:
+9,
+background:
+"#12342d",
+color:
+"#b9f3de",
+fontSize:
+13,
+}}
+>
+{text}
+</div>
+);
+}
+
+/* =========================================================
+DOCUMENT LIST
+========================================================= */
+
+function DocumentList({
+title,
+documents,
+employees,
+openDocument,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+marginTop:
+20,
+}}
+>
+<h3
+style={{
+marginTop:
+0,
+}}
+>
+{title}
+</h3>
+
+{documents.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun documento presente.
+</div>
+) : (
+documents.map(
+(
+doc: Document
+) => {
+const employee =
+employees.find(
+(
+emp: Employee
+) =>
+emp.id ===
+doc.employee_id
+);
+
+return (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"15px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+}}
+>
+<div>
+<strong>
+{
+employee?.full_name ||
+"Dipendente"
+}
+</strong>
+
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</div>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{doc.file_name}
+{doc.month
+? ` · ${doc.month}/${doc.year}`
+: ` · ${doc.year}`}
+</div>
+</div>
+
+<button
+onClick={() =>
+openDocument(
+doc
+)
+}
+style={{
+...secondaryButton,
+color:
+"#16c784",
+}}
+>
+Apri PDF
+</button>
+</div>
+);
+}
+)
+)}
+</div>
+);
+}
+
+/* =========================================================
+DEADLINE LIST
+========================================================= */
+
+function DeadlineList({
+title,
+items,
+danger,
+alert,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+marginBottom:
+20,
+}}
+>
+<h3
+style={{
+marginTop:
+0,
+}}
+>
+{title}
+</h3>
+
+{items.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun documento presente.
+</div>
+) : (
+items.map(
+({
+doc,
+employee,
+}: any) => (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"14px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+}}
+>
+<div>
+<strong>
+{employee?.full_name ||
+"Dipendente"}
+</strong>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</div>
+</div>
+
+<span
+style={{
+color:
+danger
+? "#ff7777"
+: alert
+? "#ffc857"
+: "#16c784",
+fontWeight:
+900,
+fontSize:
+13,
+}}
+>
+{formatDate(
+doc.expiry_date
+)}
+</span>
+</div>
+)
+)
+)}
+</div>
 );
 }
 
@@ -4357,8 +3825,17 @@ openDocument,
 logout,
 session,
 }: any) {
-const ownCommunications =
-communications || [];
+const generalCommunications =
+communications.filter(
+(item: Communication) =>
+item.is_general
+);
+
+const personalCommunications =
+communications.filter(
+(item: Communication) =>
+!item.is_general
+);
 
 return (
 <main
@@ -4412,11 +3889,9 @@ style={{
 color:
 "#16c784",
 fontSize:
-11,
+12,
 marginTop:
 3,
-fontWeight:
-800,
 }}
 >
 AREA PERSONALE
@@ -4427,22 +3902,9 @@ AREA PERSONALE
 onClick={
 logout
 }
-style={{
-padding:
-"10px 17px",
-border:
-"1px solid #30424d",
-borderRadius:
-9,
-background:
-"#13222c",
-color:
-"#dce6e9",
-fontWeight:
-700,
-cursor:
-"pointer",
-}}
+style={
+secondaryButton
+}
 >
 Esci
 </button>
@@ -4468,6 +3930,8 @@ padding:
 30,
 border:
 "1px solid #263b47",
+marginBottom:
+20,
 }}
 >
 <div
@@ -4505,12 +3969,21 @@ Benvenuto nel tuo portale BARDOC PAY.
 </p>
 </div>
 
-{/* COMUNICAZIONI */}
+{/* =================================================
+COMUNICAZIONI
+================================================= */}
 
 <div
 style={{
-...panelStyle,
-marginTop:
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+24,
+marginBottom:
 20,
 }}
 >
@@ -4520,10 +3993,10 @@ marginTop:
 0,
 }}
 >
-📢 Comunicazioni
+💬 Comunicazioni
 </h2>
 
-{ownCommunications.length ===
+{communications.length ===
 0 ? (
 <p
 style={{
@@ -4534,99 +4007,55 @@ color:
 Non ci sono comunicazioni.
 </p>
 ) : (
-ownCommunications.map(
+<>
+{generalCommunications.map(
 (
-communication: Communication
+comm: Communication
 ) => (
-<div
+<CommunicationCard
 key={
-communication.id
+comm.id
 }
+communication={
+comm
+}
+general
+/>
+)
+)}
+
+{personalCommunications.map(
+(
+comm: Communication
+) => (
+<CommunicationCard
+key={
+comm.id
+}
+communication={
+comm
+}
+/>
+)
+)}
+</>
+)}
+</div>
+
+{/* =================================================
+DOCUMENTI
+================================================= */}
+
+<div
 style={{
-borderTop:
+background:
+"#172630",
+border:
 "1px solid #293c47",
+borderRadius:
+16,
 padding:
-"15px 0",
-}}
->
-<div
-style={{
-display:
-"flex",
-justifyContent:
-"space-between",
-gap:
-12,
-}}
->
-<strong>
-{
-communication.title
-}
-</strong>
-
-<span
-style={{
-color:
-"#16c784",
-fontSize:
-10,
-fontWeight:
-900,
-}}
->
-{communication.is_general
-? "COMUNICAZIONE GENERALE"
-: "COMUNICAZIONE PERSONALE"}
-</span>
-</div>
-
-<div
-style={{
-color:
-"#aab8bf",
-fontSize:
-13,
-marginTop:
-7,
-whiteSpace:
-"pre-wrap",
-}}
->
-{
-communication.message
-}
-</div>
-
-<div
-style={{
-color:
-"#657780",
-fontSize:
-10,
-marginTop:
-8,
-}}
->
-{new Date(
-communication.created_at
-).toLocaleString(
-"it-IT"
-)}
-</div>
-</div>
-)
-)
-)}
-</div>
-
-{/* DOCUMENTI */}
-
-<div
-style={{
-...panelStyle,
-marginTop:
-20,
+24,
 }}
 >
 <h2
@@ -4653,17 +4082,99 @@ documents.map(
 (
 doc: Document
 ) => (
-<DocumentRow
+<div
 key={
 doc.id
 }
-doc={
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"16px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+}}
+>
+<div>
+<strong>
+{documentLabel(
+doc.document_type
+)}
+</strong>
+
+<div
+style={{
+color:
+"#82919a",
+fontSize:
+12,
+marginTop:
+5,
+}}
+>
+{
+doc.file_name
+}
+
+{doc.month
+? ` · ${doc.month}/${doc.year}`
+: ` · ${doc.year}`}
+</div>
+
+{doc.expiry_date && (
+<div
+style={{
+marginTop:
+5,
+color:
+expiryStatus(
+doc.expiry_date
+) ===
+"expired"
+? "#ff7777"
+: expiryStatus(
+doc.expiry_date
+) ===
+"warning"
+? "#ffc857"
+: "#81919a",
+fontSize:
+12,
+fontWeight:
+700,
+}}
+>
+Scadenza:{" "}
+{formatDate(
+doc.expiry_date
+)}
+</div>
+)}
+</div>
+
+<button
+onClick={() =>
+openDocument(
 doc
+)
 }
-openDocument={
-openDocument
-}
-/>
+style={{
+...greenButton,
+width:
+"auto",
+padding:
+"10px 16px",
+}}
+>
+Apri PDF
+</button>
+</div>
 )
 )
 )}
@@ -4692,10 +4203,7 @@ color:
 "#dce6e9",
 }}
 >
-{
-session.user
-.email
-}
+{session.user.email}
 </strong>
 </div>
 </section>
@@ -4704,681 +4212,98 @@ session.user
 }
 
 /* =========================================================
-COMPONENTI GRAFICI
+COMMUNICATION CARD
 ========================================================= */
 
-function PageHeader({
-eyebrow,
-title,
-subtitle,
-}: any) {
+function CommunicationCard({
+communication,
+general,
+}: {
+communication: Communication;
+general?: boolean;
+}) {
 return (
 <div
 style={{
-background:
-"linear-gradient(135deg,#07141f,#102d39)",
-borderRadius:
-20,
+borderTop:
+"1px solid #293b45",
 padding:
-28,
-marginBottom:
-20,
-border:
-"1px solid #263b47",
+"16px 0",
 }}
 >
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+gap:
+15,
+}}
+>
+<div>
+<strong
+style={{
+fontSize:
+16,
+}}
+>
+{general
+? "📢 "
+: "👤 "}
+{
+communication.title
+}
+</strong>
+
 <div
 style={{
 color:
 "#16c784",
 fontSize:
 11,
-fontWeight:
-900,
-letterSpacing:
-1,
-}}
->
-{eyebrow}
-</div>
-
-<h1
-style={{
-margin:
-"8px 0 5px",
-fontSize:
-28,
-}}
->
-{title}
-</h1>
-
-<p
-style={{
-margin:
-0,
-color:
-"#a0b0b8",
-fontSize:
-13,
-}}
->
-{subtitle}
-</p>
-</div>
-);
-}
-
-function SidebarButton({
-active,
-onClick,
-children,
-}: any) {
-return (
-<button
-onClick={
-onClick
-}
-style={{
-width:
-"100%",
-padding:
-"13px 12px",
-border:
-"none",
-borderRadius:
-9,
-marginBottom:
-5,
-background:
-active
-? "#12332d"
-: "transparent",
-color:
-active
-? "#16c784"
-: "#a9b7be",
-fontWeight:
-active
-? 800
-: 600,
-cursor:
-"pointer",
-textAlign:
-"left",
-fontSize:
-13,
-}}
->
-{children}
-</button>
-);
-}
-
-function Stat({
-title,
-value,
-alert,
-danger,
-}: any) {
-return (
-<div
-style={{
-background:
-"#172630",
-border:
-"1px solid #293c47",
-borderRadius:
-14,
-padding:
-20,
-}}
->
-<div
-style={{
-color:
-"#81919a",
-fontSize:
-12,
-marginBottom:
-10,
-}}
->
-{title}
-</div>
-
-<div
-style={{
-fontSize:
-28,
-fontWeight:
-900,
-color:
-danger
-? "#ff7777"
-: alert
-? "#ffc857"
-: "#f2f6f7",
-}}
->
-{value}
-</div>
-</div>
-);
-}
-
-function QuickCard({
-title,
-text,
-button,
-onClick,
-}: any) {
-return (
-<div
-style={{
-background:
-"#172630",
-border:
-"1px solid #293c47",
-borderRadius:
-16,
-padding:
-22,
-}}
->
-<h3
-style={{
-margin:
-"0 0 7px",
-}}
->
-{title}
-</h3>
-
-<p
-style={{
-margin:
-"0 0 16px",
-color:
-"#81919a",
-fontSize:
-13,
-lineHeight:
-1.5,
-}}
->
-{text}
-</p>
-
-<button
-onClick={
-onClick
-}
-style={{
-padding:
-"10px 14px",
-border:
-"none",
-borderRadius:
-9,
-background:
-"#16c784",
-color:
-"#062019",
-fontWeight:
-900,
-cursor:
-"pointer",
-}}
->
-{button}
-</button>
-</div>
-);
-}
-
-function InfoCard({
-title,
-value,
-green,
-}: any) {
-return (
-<div
-style={{
-padding:
-17,
-background:
-"#101e28",
-border:
-"1px solid #293c47",
-borderRadius:
-12,
-}}
->
-<small
-style={{
-color:
-"#748690",
-}}
->
-{title}
-</small>
-
-<div
-style={{
-marginTop:
-6,
 fontWeight:
 800,
-color:
-green
-? "#16c784"
-: "#fff",
-fontSize:
-13,
-}}
->
-{value}
-</div>
-</div>
-);
-}
-
-function DocumentRow({
-doc,
-openDocument,
-}: any) {
-return (
-<div
-style={{
-borderTop:
-"1px solid #293c47",
-padding:
-"14px 0",
-display:
-"flex",
-justifyContent:
-"space-between",
-alignItems:
-"center",
-gap:
-15,
-}}
->
-<div>
-<strong>
-{documentLabel(
-doc.document_type
-)}
-</strong>
-
-<div
-style={{
-color:
-"#81919a",
-fontSize:
-12,
 marginTop:
-4,
+5,
 }}
 >
-{doc.file_name}
-{doc.month
-? ` · ${MONTHS[doc.month - 1]} ${doc.year}`
-: ` · ${doc.year}`}
-</div>
-
-{doc.tax_code && (
-<div
-style={{
-color:
-"#687983",
-fontSize:
-11,
-marginTop:
-3,
-}}
->
-CF:{" "}
-{doc.tax_code}
-</div>
-)}
-
-{doc.expiry_date && (
-<div
-style={{
-color:
-expiryStatus(
-doc.expiry_date
-) ===
-"expired"
-? "#ff7777"
-: expiryStatus(
-doc.expiry_date
-) ===
-"warning"
-? "#ffc857"
-: "#81919a",
-fontSize:
-11,
-fontWeight:
-700,
-marginTop:
-4,
-}}
->
-Scadenza:{" "}
-{formatDate(
-doc.expiry_date
-)}
-</div>
-)}
-</div>
-
-<button
-onClick={() =>
-openDocument(
-doc
-)
-}
-style={{
-background:
-"#16c784",
-border:
-"none",
-borderRadius:
-9,
-padding:
-"10px 15px",
-fontWeight:
-900,
-cursor:
-"pointer",
-flexShrink:
-0,
-}}
->
-Apri PDF
-</button>
-</div>
-);
-}
-
-function DeadlineRow({
-doc,
-employee,
-openDocument,
-expired,
-}: any) {
-return (
-<div
-style={{
-borderTop:
-"1px solid #293c47",
-padding:
-"15px 0",
-display:
-"flex",
-justifyContent:
-"space-between",
-alignItems:
-"center",
-gap:
-15,
-}}
->
-<div>
-<strong>
-{employee?.full_name ||
-"Dipendente"}
-</strong>
-
-<div
-style={{
-color:
-"#81919a",
-fontSize:
-12,
-marginTop:
-4,
-}}
->
-{documentLabel(
-doc.document_type
-)}
+{general
+? "COMUNICAZIONE GENERALE"
+: "COMUNICAZIONE PERSONALE"}
 </div>
 </div>
 
-<div
-style={{
-display:
-"flex",
-alignItems:
-"center",
-gap:
-15,
-}}
->
 <span
 style={{
 color:
-expired
-? "#ff7777"
-: "#ffc857",
-fontWeight:
-900,
+"#71828c",
 fontSize:
-12,
+11,
 }}
 >
-{formatDate(
-doc.expiry_date
+{formatCommunicationDate(
+communication.created_at
 )}
 </span>
-
-<button
-onClick={() =>
-openDocument(
-doc
-)
-}
-style={{
-padding:
-"8px 12px",
-border:
-"1px solid #30424d",
-borderRadius:
-8,
-background:
-"#13222c",
-color:
-"#dce6e9",
-cursor:
-"pointer",
-fontWeight:
-700,
-}}
->
-Apri
-</button>
 </div>
-</div>
-);
-}
 
-function Field({
-label,
-children,
-}: any) {
-return (
 <div
 style={{
 marginTop:
-16,
-}}
->
-<label
-style={{
-display:
-"block",
-color:
-"#aebbc2",
-fontSize:
-12,
-fontWeight:
-700,
-marginBottom:
-7,
-}}
->
-{label}
-</label>
-
-{children}
-</div>
-);
-}
-
-function EmptyState({
-text,
-}: {
-text: string;
-}) {
-return (
-<div
-style={{
-padding:
-25,
-textAlign:
-"center",
-color:
-"#81919a",
-}}
->
-{text}
-</div>
-);
-}
-
-function MessageBox({
-message,
-}: {
-message: string;
-}) {
-return (
-<div
-style={{
-marginTop:
-15,
-padding:
-13,
-borderRadius:
-9,
-background:
-"#12342d",
-color:
-"#b9f3de",
-fontSize:
-13,
-}}
->
-{message}
-</div>
-);
-}
-
-/* =========================================================
-STILI
-========================================================= */
-
-const panelStyle: React.CSSProperties =
-{
-background:
-"#172630",
-border:
-"1px solid #293c47",
-borderRadius:
-16,
-padding:
-22,
-marginBottom:
-20,
-};
-
-const darkInput: React.CSSProperties =
-{
-width:
-"100%",
-boxSizing:
-"border-box",
-padding:
-"13px 14px",
-borderRadius:
-9,
-border:
-"1px solid #344955",
-background:
-"#101e28",
-color:
-"#fff",
-fontSize:
-14,
-outline:
-"none",
-};
-
-const darkSelect: React.CSSProperties =
-{
-width:
-"100%",
-padding:
-13,
-borderRadius:
-9,
-border:
-"1px solid #344955",
-background:
-"#101e28",
-color:
-"#fff",
-boxSizing:
-"border-box",
-fontSize:
-14,
-};
-
-const greenButton: React.CSSProperties =
-{
-width:
-"100%",
-padding:
-14,
-border:
-"none",
-borderRadius:
 10,
-background:
-"#16c784",
 color:
-"#062019",
-fontWeight:
-900,
-cursor:
-"pointer",
-};
-
-const backButton: React.CSSProperties =
+"#c4d0d5",
+lineHeight:
+1.6,
+whiteSpace:
+"pre-wrap",
+}}
+>
 {
-border:
-"none",
-background:
-"transparent",
-color:
-"#16c784",
-fontWeight:
-800,
-cursor:
-"pointer",
-marginBottom:
-20,
-};
+communication.message
+}
+</div>
+</div>
+);
+}
