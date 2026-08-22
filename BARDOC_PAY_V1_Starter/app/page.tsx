@@ -1,58 +1,69 @@
 "use client";
 
-export default function Home() {
-  return (
-    <main
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        background: "#081521",
-        color: "white",
-        fontFamily: "Arial",
-      }}
-    >
-      <div style={{ textAlign: "center" }}>
-        <h1>BARDOC PAY</h1>
-        <p>Build riuscito.</p>
-      </div>
-    </main>
-  );
-}
-storage_path:string;
-tax_code:string|null;
-expiry_date:string|null;
-};
-type Communication={
-id:string;
-employee_id:string|null;
-title:string;
-message:string;
-is_general:boolean;
-created_at:string;
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../lib/supabase";
+
+/* =========================
+   TIPI
+========================= */
+
+type Employee = {
+  id: string;
+  auth_user_id: string | null;
+  full_name: string;
+  email: string | null;
+  active: boolean;
+  photo_url?: string | null;
+  hire_date?: string | null;
 };
 
-type Attendance={
-id:string;
-employee_id:string;
-year:number;
-month:number;
-present_days:number;
-absent_days:number;
+type Document = {
+  id: string;
+  employee_id: string;
+  document_type: string;
+  month: number | null;
+  year: number;
+  file_name: string;
+  storage_path: string;
+  tax_code: string | null;
+  expiry_date: string | null;
 };
 
-type ExtraPayment={
-id:string;
-employee_id:string;
-year:number;
-month:number;
-amount:number;
-description:string|null;
+type Communication = {
+  id: string;
+  employee_id: string | null;
+  title: string;
+  message: string;
+  is_general: boolean;
+  created_at: string;
 };
 
-type AdminMessage={
-id:string;
+type Attendance = {
+  id: string;
+  employee_id: string;
+  year: number;
+  month: number;
+  present_days: number;
+  absent_days: number;
+};
+
+type ExtraPayment = {
+  id: string;
+  employee_id: string;
+  year: number;
+  month: number;
+  amount: number;
+  description: string | null;
+};
+
+type AdminMessage = {
+  id: string;
+  employee_id: string;
+  subject: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+};
 employee_id:string;
 subject:string;
 message:string;
