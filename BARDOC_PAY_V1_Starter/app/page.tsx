@@ -1,25 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabase";
-
-type Employee={
-id:string;
-auth_user_id:string|null;
-full_name:string;
-email:string|null;
-active:boolean;
-photo_url?:string|null;
-hire_date?:string|null;
-};
-
-type Document={
-id:string;
-employee_id:string;
-document_type:string;
-month:number|null;
-year:number;
-file_name:string;
+export default function Home() {
+  return (
+    <main
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#081521",
+        color: "white",
+        fontFamily: "Arial",
+      }}
+    >
+      <div style={{ textAlign: "center" }}>
+        <h1>BARDOC PAY</h1>
+        <p>Build riuscito.</p>
+      </div>
+    </main>
+  );
+}
 storage_path:string;
 tax_code:string|null;
 expiry_date:string|null;
