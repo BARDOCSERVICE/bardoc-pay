@@ -1,847 +1,5284 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { supabase } from "../lib/supabase";
 
 /* =========================================================
-   BARDOC PAY - PAGINA COMPLETA
-   ========================================================= */
+TIPI
+========================================================= */
 
 type Employee = {
-  id: string;
-  auth_user_id: string | null;
-  full_name: string;
-  email: string | null;
-  active: boolean;
+id: string;
+auth_user_id: string | null;
+full_name: string;
+email: string | null;
+active: boolean;
+
+// Nuovi dati anagrafici/profilo
+photo_url?: string | null;
+hire_date?: string | null;
 };
 
-type DocumentRow = {
-  id: string;
-  employee_id: string;
-  document_type: string;
-  month: number | null;
-  year: number;
-  file_name: string;
-  storage_path: string;
-  tax_code: string | null;
-  expiry_date: string | null;
+type Document = {
+id: string;
+employee_id: string;
+document_type: string;
+month: number | null;
+year: number;
+file_name: string;
+storage_path: string;
+tax_code: string | null;
+expiry_date: string | null;
 };
 
 type Communication = {
-  id: string;
-  employee_id: string | null;
-  title: string;
-  message: string;
-  is_general: boolean;
-  created_at: string;
+id: string;
+employee_id: string | null;
+title: string;
+message: string;
+is_general: boolean;
+created_at: string;
 };
 
-type EmployeeProfile = {
-  employee_id: string;
-  employment_start_date: string | null;
-  photo_path: string | null;
+type ChatMessage = {
+id: string;
+employee_id: string;
+sender_role: "admin" | "employee";
+sender_user_id: string | null;
+message: string;
+created_at: string;
 };
 
 type Attendance = {
-  id: string;
-  employee_id: string;
-  year: number;
-  month: number;
-  present_days: number;
-  absent_days: number;
+id: string;
+employee_id: string;
+year: number;
+month: number;
+present_days: number;
+absent_days: number;
 };
+
+type ExtraPayment = {
+id: string;
+employee_id: string;
+year: number;
+month: number;
+amount: number;
+description: string | null;
+};
+
+/* =========================================================
+CONFIGURAZIONE
+========================================================= */
 
 const ADMIN_EMAIL = "bardocfg@gmail.com";
+
 const CURRENT_YEAR = new Date().getFullYear();
 
-const YEARS = Array.from({ length: 8 }, (_, i) => CURRENT_YEAR - 5 + i);
+const YEARS = Array.from(
+{ length: 8 },
+(_, i) => CURRENT_YEAR - 5 + i
+);
 
 const MONTHS = [
-  "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
-  "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre",
+"Gennaio",
+"Febbraio",
+"Marzo",
+"Aprile",
+"Maggio",
+"Giugno",
+"Luglio",
+"Agosto",
+"Settembre",
+"Ottobre",
+"Novembre",
+"Dicembre",
 ];
+
+const DOCUMENT_TYPES = {
+retribuzione: [
+{
+value: "payslip",
+label: "Busta paga",
+},
+{
+value: "payment_statement",
+label: "Distinta di pagamento",
+},
+],
+
+lavoro: [
+{
+value: "work_contract",
+label: "Contratto di lavoro",
+},
+],
+
+permessi: [
+{
+value: "leave_permit",
+label: "Foglio permesso / assenza",
+},
+],
+
+personali: [
+{
+value: "id_card",
+label: "Documento d'identità",
+},
+{
+value: "driver_license",
+label: "Patente",
+},
+],
+
+curriculum: [
+{
+value: "curriculum",
+label: "Curriculum / CV storico",
+},
+],
+};
 
 const CATEGORY_LABELS: Record<string, string> = {
-  lavoro: "Rapporto di lavoro",
-  permessi: "Permessi e assenze",
-  personali: "Documenti personali",
-  curriculum: "Curriculum",
+retribuzione: "Retribuzione",
+lavoro: "Rapporto di lavoro",
+permessi: "Permessi e assenze",
+personali: "Documenti personali",
+curriculum: "Curriculum",
 };
 
-const DOCUMENT_TYPES: Record<string, { value: string; label: string }[]> = {
-  lavoro: [{ value: "work_contract", label: "Contratto di lavoro" }],
-  permessi: [{ value: "leave_permit", label: "Foglio permesso / assenza" }],
-  personali: [
-    { value: "id_card", label: "Documento d'identità" },
-    { value: "driver_license", label: "Patente" },
-  ],
-  curriculum: [{ value: "curriculum", label: "Curriculum / CV storico" }],
-};
-
-const PAYMENT_TYPES = [
-  { value: "payslip", label: "Busta paga" },
-  { value: "payment_statement", label: "Distinta di pagamento" },
-  { value: "extra", label: "Extra" },
-  { value: "work_bonus", label: "Premio lavorativo" },
-];
+/* =========================================================
+FUNZIONI
+========================================================= */
 
 function documentLabel(type: string) {
-  if (type === "payslip") return "Busta paga";
-  if (type === "payment_statement") return "Distinta di pagamento";
-  if (type === "extra") return "Extra";
-  if (type === "work_bonus") return "Premio lavorativo";
-  return Object.values(DOCUMENT_TYPES).flat().find(x => x.value === type)?.label || type;
+const all = Object.values(DOCUMENT_TYPES).flat();
+
+return (
+all.find((item) => item.value === type)?.label ||
+type
+);
 }
 
-function monthLabel(month: number | null) {
-  return month ? MONTHS[month - 1] || String(month) : "";
+function formatDate(date: string | null | undefined) {
+if (!date) return "—";
+
+const parts = date.split("-");
+
+if (parts.length !== 3) {
+return date;
 }
 
-function formatDate(value: string | null) {
-  if (!value) return "—";
-  const parts = value.split("-");
-  return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : value;
+return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
 function formatCommunicationDate(value: string) {
-  return new Date(value).toLocaleString("it-IT", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+const date = new Date(value);
+
+return date.toLocaleString("it-IT", {
+day: "2-digit",
+month: "2-digit",
+year: "numeric",
+hour: "2-digit",
+minute: "2-digit",
+});
+}
+
+function daysUntil(date: string) {
+const today = new Date();
+
+today.setHours(0, 0, 0, 0);
+
+const expiry = new Date(`${date}T00:00:00`);
+
+return Math.ceil(
+(expiry.getTime() - today.getTime()) /
+86400000
+);
 }
 
 function expiryStatus(date: string | null) {
-  if (!date) return "none";
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const expiry = new Date(`${date}T00:00:00`);
-  const days = Math.ceil((expiry.getTime() - today.getTime()) / 86400000);
-  if (days < 0) return "expired";
-  if (days <= 30) return "warning";
-  return "valid";
+if (!date) return "none";
+
+const days = daysUntil(date);
+
+if (days < 0) return "expired";
+if (days <= 30) return "warning";
+
+return "valid";
 }
 
-const inputStyle: CSSProperties = {
-  width: "100%", boxSizing: "border-box", padding: "13px 14px",
-  borderRadius: 10, border: "1px solid #344955", background: "#101e28",
-  color: "#fff", fontSize: 14, outline: "none",
-};
-
-const selectStyle: CSSProperties = { ...inputStyle };
-
-const buttonStyle: CSSProperties = {
-  width: "100%", padding: 14, border: "none", borderRadius: 10,
-  background: "#16c784", color: "#062019", fontWeight: 900, cursor: "pointer",
-};
-
-const secondaryButton: CSSProperties = {
-  padding: "10px 15px", border: "1px solid #344955", borderRadius: 9,
-  background: "#13222c", color: "#dce6e9", fontWeight: 800, cursor: "pointer",
-};
-
-const cardStyle: CSSProperties = {
-  background: "#172630", border: "1px solid #293c47", borderRadius: 16, padding: 22,
-};
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ marginTop: 16 }}>
-      <label style={{ display: "block", color: "#aebbc2", fontSize: 12, fontWeight: 800, marginBottom: 7 }}>
-        {label}
-      </label>
-      {children}
-    </div>
-  );
+function money(value: number) {
+return new Intl.NumberFormat("it-IT", {
+style: "currency",
+currency: "EUR",
+}).format(value);
 }
 
-function Message({ text }: { text: string }) {
-  return <div style={{ marginTop: 15, padding: 13, borderRadius: 9, background: "#12342d", color: "#b9f3de", fontSize: 13 }}>{text}</div>;
-}
+/* =========================================================
+STILI
+========================================================= */
+
+const darkInput: React.CSSProperties = {
+width: "100%",
+boxSizing: "border-box",
+padding: "13px 14px",
+borderRadius: 10,
+border: "1px solid #344955",
+background: "#101e28",
+color: "#fff",
+fontSize: 14,
+outline: "none",
+};
+
+const darkSelect: React.CSSProperties = {
+width: "100%",
+padding: 13,
+borderRadius: 9,
+border: "1px solid #344955",
+background: "#101e28",
+color: "#fff",
+boxSizing: "border-box",
+fontSize: 14,
+};
+
+const greenButton: React.CSSProperties = {
+width: "100%",
+padding: 14,
+border: "none",
+borderRadius: 10,
+background: "#16c784",
+color: "#062019",
+fontWeight: 900,
+cursor: "pointer",
+};
+
+const secondaryButton: React.CSSProperties = {
+padding: "11px 16px",
+border: "1px solid #344955",
+borderRadius: 9,
+background: "#13222c",
+color: "#dce6e9",
+fontWeight: 700,
+cursor: "pointer",
+};
+
+/* =========================================================
+HOME
+========================================================= */
 
 export default function Home() {
-  const [session, setSession] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginMode, setLoginMode] = useState(true);
-  const [message, setMessage] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+const [session, setSession] = useState<any>(null);
+const [loading, setLoading] = useState(true);
 
-  const [employee, setEmployee] = useState<Employee | null>(null);
-  const [employeeProfile, setEmployeeProfile] = useState<EmployeeProfile | null>(null);
-  const [employeePhotoUrl, setEmployeePhotoUrl] = useState<string | null>(null);
-  const [documents, setDocuments] = useState<DocumentRow[]>([]);
-  const [communications, setCommunications] = useState<Communication[]>([]);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
+const [email, setEmail] = useState("");
+const [password, setPassword] = useState("");
 
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [allDocuments, setAllDocuments] = useState<DocumentRow[]>([]);
-  const [adminCommunications, setAdminCommunications] = useState<Communication[]>([]);
-  const [profiles, setProfiles] = useState<EmployeeProfile[]>([]);
-  const [allAttendance, setAllAttendance] = useState<Attendance[]>([]);
-  const [adminLoading, setAdminLoading] = useState(false);
+const [loginMode, setLoginMode] = useState(true);
 
-  const [activeSection, setActiveSection] = useState("dashboard");
-  const [search, setSearch] = useState("");
-  const [selectedEmployee, setSelectedEmployee] = useState("");
+const [message, setMessage] = useState("");
+const [submitting, setSubmitting] = useState(false);
 
-  const [category, setCategory] = useState("personali");
-  const [documentType, setDocumentType] = useState("id_card");
-  const [month, setMonth] = useState(new Date().getMonth() + 1);
-  const [year, setYear] = useState(CURRENT_YEAR);
-  const [taxCode, setTaxCode] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+const [employee, setEmployee] =
+useState<Employee | null>(null);
 
-  const [paymentType, setPaymentType] = useState("payslip");
-  const [paymentMonth, setPaymentMonth] = useState(new Date().getMonth() + 1);
-  const [paymentYear, setPaymentYear] = useState(CURRENT_YEAR);
-  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+const [employees, setEmployees] =
+useState<Employee[]>([]);
 
-  const [communicationMode, setCommunicationMode] = useState<"individual" | "general">("individual");
-  const [communicationEmployee, setCommunicationEmployee] = useState("");
-  const [communicationTitle, setCommunicationTitle] = useState("");
-  const [communicationMessage, setCommunicationMessage] = useState("");
+const [documents, setDocuments] =
+useState<Document[]>([]);
 
-  const [profileEmployee, setProfileEmployee] = useState("");
-  const [employmentStartDate, setEmploymentStartDate] = useState("");
-  const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
+const [allDocuments, setAllDocuments] =
+useState<Document[]>([]);
 
-  const [attendanceEmployee, setAttendanceEmployee] = useState("");
-  const [attendanceYear, setAttendanceYear] = useState(CURRENT_YEAR);
-  const [attendanceMonth, setAttendanceMonth] = useState(new Date().getMonth() + 1);
-  const [presentDays, setPresentDays] = useState(0);
-  const [absentDays, setAbsentDays] = useState(0);
+const [communications, setCommunications] =
+useState<Communication[]>([]);
 
-  const isAdmin = session?.user?.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+const [adminCommunications, setAdminCommunications] =
+useState<Communication[]>([]);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
-      setSession(newSession);
-      setLoading(false);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+const [attendance, setAttendance] =
+useState<Attendance[]>([]);
 
-  useEffect(() => {
-    if (!session) return;
-    if (isAdmin) loadAdminData();
-    else loadEmployeeArea();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, isAdmin]);
+const [extraPayments, setExtraPayments] =
+useState<ExtraPayment[]>([]);
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setMessage("");
-    setSubmitting(true);
-    if (loginMode) {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage("Email o password non corretti.");
-    } else {
-      const { error } = await supabase.auth.signUp({ email, password });
-      setMessage(error ? error.message : "Account creato. Controlla la tua email se è richiesta la conferma.");
-    }
-    setSubmitting(false);
-  }
+const [chatMessages, setChatMessages] =
+useState<ChatMessage[]>([]);
 
-  async function logout() {
-    await supabase.auth.signOut();
-    setSession(null); setEmployee(null); setDocuments([]); setEmployees([]);
-    setAllDocuments([]); setCommunications([]); setAdminCommunications([]);
-    setProfiles([]); setAllAttendance([]); setAttendance([]); setEmployeePhotoUrl(null);
-  }
+const [adminLoading, setAdminLoading] =
+useState(false);
 
-  async function signedPhoto(path: string | null) {
-    if (!path) return null;
-    const { data } = await supabase.storage.from("employee-photos").createSignedUrl(path, 3600);
-    return data?.signedUrl || null;
-  }
+const [activeSection, setActiveSection] =
+useState("dashboard");
 
-  async function loadEmployeeArea() {
-    if (!session?.user?.id) return;
-    const { data: emp, error } = await supabase.from("employees").select("*").eq("auth_user_id", session.user.id).maybeSingle();
-    if (error) { console.error(error); return; }
-    setEmployee(emp || null);
-    if (!emp) return;
+const [search, setSearch] = useState("");
 
-    const [docsRes, commRes, profileRes, attendanceRes] = await Promise.all([
-      supabase.from("documents").select("*").eq("employee_id", emp.id).order("year", { ascending: false }).order("month", { ascending: false }),
-      supabase.from("communications").select("*").order("created_at", { ascending: false }),
-      supabase.from("employee_profiles").select("*").eq("employee_id", emp.id).maybeSingle(),
-      supabase.from("attendance_monthly").select("*").eq("employee_id", emp.id).order("year", { ascending: false }).order("month", { ascending: false }),
-    ]);
+/* =====================================================
+DOCUMENTI
+===================================================== */
 
-    setDocuments(docsRes.data || []);
-    setCommunications(commRes.data || []);
-    setEmployeeProfile(profileRes.data || null);
-    setAttendance(attendanceRes.data || []);
-    setEmployeePhotoUrl(await signedPhoto(profileRes.data?.photo_path || null));
-  }
+const [selectedEmployee, setSelectedEmployee] =
+useState("");
 
-  async function loadAdminData() {
-    setAdminLoading(true);
-    const [empRes, docsRes, commRes, profileRes, attendanceRes] = await Promise.all([
-      supabase.from("employees").select("*").eq("active", true).order("full_name"),
-      supabase.from("documents").select("*").order("year", { ascending: false }).order("month", { ascending: false }),
-      supabase.from("communications").select("*").order("created_at", { ascending: false }),
-      supabase.from("employee_profiles").select("*"),
-      supabase.from("attendance_monthly").select("*").order("year", { ascending: false }).order("month", { ascending: false }),
-    ]);
-    if (empRes.error) setMessage("Impossibile caricare i dipendenti.");
-    setEmployees(empRes.data || []);
-    setAllDocuments(docsRes.data || []);
-    setAdminCommunications(commRes.data || []);
-    setProfiles(profileRes.data || []);
-    setAllAttendance(attendanceRes.data || []);
-    setAdminLoading(false);
-  }
+const [category, setCategory] =
+useState("retribuzione");
 
-  function resetDocumentForm() {
-    setSelectedEmployee(""); setCategory("personali"); setDocumentType("id_card");
-    setYear(CURRENT_YEAR); setTaxCode(""); setExpiryDate(""); setFile(null);
-  }
+const [documentType, setDocumentType] =
+useState("payslip");
 
-  async function uploadDocument() {
-    setMessage("");
-    if (!selectedEmployee) return setMessage("Seleziona un dipendente.");
-    if (!file) return setMessage("Seleziona un file PDF.");
-    if (file.type !== "application/pdf") return setMessage("Il documento deve essere un PDF.");
-    const cf = taxCode.trim().toUpperCase();
-    if (cf && !/^[A-Z0-9]{16}$/.test(cf)) return setMessage("Il Codice Fiscale deve contenere 16 caratteri alfanumerici.");
-    if (documentType === "driver_license" && !cf) return setMessage("Per la patente il Codice Fiscale è obbligatorio.");
-    if ((documentType === "id_card" || documentType === "driver_license") && !expiryDate) return setMessage("Inserisci la data di scadenza.");
+const [month, setMonth] =
+useState(new Date().getMonth() + 1);
 
-    setSubmitting(true);
-    try {
-      const safe = file.name.replace(/[^\w.\- ]/g, "").replace(/\s+/g, "_");
-      const path = `${selectedEmployee}/${Date.now()}_${safe}`;
-      const { error: uploadError } = await supabase.storage.from("payroll-documents").upload(path, file, { upsert: false, contentType: "application/pdf" });
-      if (uploadError) throw uploadError;
-      const { error } = await supabase.from("documents").insert({
-        employee_id: selectedEmployee, document_type: documentType, month: null, year,
-        file_name: file.name, storage_path: path, tax_code: cf || null, expiry_date: expiryDate || null,
-      });
-      if (error) throw error;
-      setMessage("Documento caricato correttamente. ✅");
-      resetDocumentForm();
-      await loadAdminData();
-    } catch (e: any) { setMessage(e?.message || "Errore durante il caricamento del documento."); }
-    setSubmitting(false);
-  }
+const [year, setYear] =
+useState(CURRENT_YEAR);
 
-  async function uploadPayment() {
-    setMessage("");
-    if (!selectedEmployee) return setMessage("Seleziona un dipendente.");
-    if (!paymentFile) return setMessage("Seleziona un file PDF.");
-    if (paymentFile.type !== "application/pdf") return setMessage("Il documento deve essere un PDF.");
-    setSubmitting(true);
-    try {
-      const safe = paymentFile.name.replace(/[^\w.\- ]/g, "").replace(/\s+/g, "_");
-      const path = `${selectedEmployee}/${paymentYear}/${String(paymentMonth).padStart(2, "0")}/${Date.now()}_${safe}`;
-      const { error: uploadError } = await supabase.storage.from("payroll-documents").upload(path, paymentFile, { upsert: false, contentType: "application/pdf" });
-      if (uploadError) throw uploadError;
-      const { error } = await supabase.from("documents").insert({
-        employee_id: selectedEmployee, document_type: paymentType, month: paymentMonth, year: paymentYear,
-        file_name: paymentFile.name, storage_path: path, tax_code: null, expiry_date: null,
-      });
-      if (error) throw error;
-      setPaymentFile(null);
-      setMessage("Documento di pagamento caricato correttamente. ✅");
-      await loadAdminData();
-    } catch (e: any) { setMessage(e?.message || "Errore durante il caricamento del pagamento."); }
-    setSubmitting(false);
-  }
+const [taxCode, setTaxCode] =
+useState("");
 
-  async function openDocument(doc: DocumentRow) {
-    const { data, error } = await supabase.storage.from("payroll-documents").createSignedUrl(doc.storage_path, 300);
-    if (error || !data?.signedUrl) return setMessage("Impossibile aprire il documento.");
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
-  }
+const [expiryDate, setExpiryDate] =
+useState("");
 
-  async function sendCommunication() {
-    setMessage("");
-    const title = communicationTitle.trim();
-    const text = communicationMessage.trim();
-    if (!title) return setMessage("Inserisci il titolo della comunicazione.");
-    if (!text) return setMessage("Inserisci il testo della comunicazione.");
-    if (communicationMode === "individual" && !communicationEmployee) return setMessage("Seleziona il dipendente destinatario.");
-    setSubmitting(true);
-    try {
-      const { error } = await supabase.from("communications").insert({
-        employee_id: communicationMode === "individual" ? communicationEmployee : null,
-        title, message: text, is_general: communicationMode === "general",
-      });
-      if (error) throw error;
-      setCommunicationTitle(""); setCommunicationMessage(""); setCommunicationEmployee("");
-      setMessage(communicationMode === "general" ? "Comunicazione generale inviata a tutti i dipendenti. ✅" : "Comunicazione inviata al dipendente selezionato. ✅");
-      await loadAdminData();
-    } catch (e: any) { setMessage(e?.message || "Errore durante l'invio della comunicazione."); }
-    setSubmitting(false);
-  }
+const [file, setFile] =
+useState<File | null>(null);
 
-  async function deleteCommunication(id: string) {
-    if (!window.confirm("Vuoi cancellare definitivamente questa comunicazione?")) return;
-    setSubmitting(true);
-    const { error } = await supabase.from("communications").delete().eq("id", id);
-    if (error) setMessage(error.message);
-    else { setMessage("Comunicazione cancellata. ✅"); await loadAdminData(); }
-    setSubmitting(false);
-  }
+/* =====================================================
+COMUNICAZIONI
+===================================================== */
 
-  async function saveProfile() {
-    setMessage("");
-    if (!profileEmployee) return setMessage("Seleziona un dipendente.");
-    setSubmitting(true);
-    try {
-      let photoPath = profiles.find(p => p.employee_id === profileEmployee)?.photo_path || null;
-      if (profilePhoto) {
-        if (!profilePhoto.type.startsWith("image/")) throw new Error("La foto deve essere un'immagine.");
-        const safe = profilePhoto.name.replace(/[^\w.\-]/g, "_");
-        const path = `${profileEmployee}/${Date.now()}_${safe}`;
-        const { error } = await supabase.storage.from("employee-photos").upload(path, profilePhoto, { upsert: false });
-        if (error) throw error;
-        photoPath = path;
-      }
-      const { error } = await supabase.from("employee_profiles").upsert({
-        employee_id: profileEmployee,
-        employment_start_date: employmentStartDate || null,
-        photo_path: photoPath,
-      }, { onConflict: "employee_id" });
-      if (error) throw error;
-      setProfilePhoto(null);
-      setMessage("Profilo dipendente aggiornato. ✅");
-      await loadAdminData();
-    } catch (e: any) { setMessage(e?.message || "Errore durante il salvataggio del profilo."); }
-    setSubmitting(false);
-  }
+const [communicationMode, setCommunicationMode] =
+useState<"individual" | "general">(
+"individual"
+);
 
-  function selectProfileEmployee(id: string) {
-    setProfileEmployee(id);
-    const profile = profiles.find(p => p.employee_id === id);
-    setEmploymentStartDate(profile?.employment_start_date || "");
-    setProfilePhoto(null);
-  }
+const [communicationEmployee, setCommunicationEmployee] =
+useState("");
 
-  function selectAttendanceEmployee(id: string) {
-    setAttendanceEmployee(id);
-    const row = allAttendance.find(a => a.employee_id === id && a.year === attendanceYear && a.month === attendanceMonth);
-    setPresentDays(row?.present_days || 0);
-    setAbsentDays(row?.absent_days || 0);
-  }
+const [communicationTitle, setCommunicationTitle] =
+useState("");
 
-  function loadAttendanceForm(yearValue: number, monthValue: number, employeeId = attendanceEmployee) {
-    setAttendanceYear(yearValue); setAttendanceMonth(monthValue);
-    const row = allAttendance.find(a => a.employee_id === employeeId && a.year === yearValue && a.month === monthValue);
-    setPresentDays(row?.present_days || 0); setAbsentDays(row?.absent_days || 0);
-  }
+const [communicationMessage, setCommunicationMessage] =
+useState("");
 
-  async function saveAttendance() {
-    setMessage("");
-    if (!attendanceEmployee) return setMessage("Seleziona un dipendente.");
-    if (presentDays < 0 || absentDays < 0) return setMessage("I giorni non possono essere negativi.");
-    setSubmitting(true);
-    const { error } = await supabase.from("attendance_monthly").upsert({
-      employee_id: attendanceEmployee, year: attendanceYear, month: attendanceMonth,
-      present_days: Number(presentDays), absent_days: Number(absentDays),
-    }, { onConflict: "employee_id,year,month" });
-    if (error) setMessage(error.message);
-    else { setMessage("Presenze e assenze salvate. ✅"); await loadAdminData(); }
-    setSubmitting(false);
-  }
+/* =====================================================
+CHAT
+===================================================== */
 
-  const filteredEmployees = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return employees;
-    const ids = new Set(allDocuments.filter(d => (d.tax_code || "").toLowerCase().includes(q)).map(d => d.employee_id));
-    return employees.filter(e => e.full_name.toLowerCase().includes(q) || (e.email || "").toLowerCase().includes(q) || ids.has(e.id));
-  }, [search, employees, allDocuments]);
+const [chatInput, setChatInput] =
+useState("");
 
-  const payslips = useMemo(() => allDocuments.filter(d => d.document_type === "payslip"), [allDocuments]);
-  const paymentStatements = useMemo(() => allDocuments.filter(d => d.document_type === "payment_statement"), [allDocuments]);
-  const extras = useMemo(() => allDocuments.filter(d => d.document_type === "extra"), [allDocuments]);
-  const bonuses = useMemo(() => allDocuments.filter(d => d.document_type === "work_bonus"), [allDocuments]);
+const isAdmin =
+session?.user?.email?.toLowerCase() ===
+ADMIN_EMAIL.toLowerCase();
 
-  const expiringDocuments = useMemo(() => allDocuments.filter(d => expiryStatus(d.expiry_date) === "warning"), [allDocuments]);
-  const expiredDocuments = useMemo(() => allDocuments.filter(d => expiryStatus(d.expiry_date) === "expired"), [allDocuments]);
+/* =====================================================
+SESSIONE
+===================================================== */
 
-  useEffect(() => {
-    if (!profileEmployee) return;
-    const profile = profiles.find(p => p.employee_id === profileEmployee);
-    setEmploymentStartDate(profile?.employment_start_date || "");
-  }, [profiles, profileEmployee]);
+useEffect(() => {
+supabase.auth
+.getSession()
+.then(({ data }) => {
+setSession(data.session);
+setLoading(false);
+});
 
-  if (loading) return <LoadingScreen />;
+const {
+data: { subscription },
+} = supabase.auth.onAuthStateChange(
+(_event, newSession) => {
+setSession(newSession);
+setLoading(false);
+}
+);
 
-  if (!session) {
-    return (
-      <main style={loginPage}>
-        <div style={{ ...cardStyle, width: "100%", maxWidth: 450, padding: 40, background: "#111e28" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={logoBox}>B</div>
-            <div style={{ color: "#16c784", fontWeight: 900, letterSpacing: 2, fontSize: 13 }}>BARDOC SERVICE</div>
-            <h1 style={{ margin: "8px 0 5px", fontSize: 30 }}>BARDOC PAY</h1>
-            <p style={{ color: "#9daab2", margin: "0 0 28px", fontSize: 14 }}>Portale digitale del personale</p>
-          </div>
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={inputStyle} />
-            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={inputStyle} />
-            <button type="submit" disabled={submitting} style={{ ...buttonStyle, opacity: submitting ? .6 : 1 }}>{submitting ? "ATTENDERE..." : loginMode ? "ACCEDI AL PORTALE" : "CREA ACCOUNT"}</button>
-          </form>
-          <button type="button" onClick={() => { setLoginMode(!loginMode); setMessage(""); }} style={{ width: "100%", marginTop: 20, border: 0, background: "transparent", color: "#16c784", fontWeight: 800, cursor: "pointer" }}>
-            {loginMode ? "Non hai ancora un account? Registrati" : "Hai già un account? Accedi"}
-          </button>
-          {message && <Message text={message} />}
-        </div>
-      </main>
-    );
-  }
+return () => subscription.unsubscribe();
+}, []);
 
-  if (isAdmin) {
-    return (
-      <AdminDashboard
-        activeSection={activeSection} setActiveSection={setActiveSection}
-        employees={filteredEmployees} allEmployees={employees} documents={allDocuments}
-        payslips={payslips} paymentStatements={paymentStatements} extras={extras} bonuses={bonuses}
-        communications={adminCommunications} search={search} setSearch={setSearch}
-        selectedEmployee={selectedEmployee} setSelectedEmployee={setSelectedEmployee}
-        category={category} setCategory={(v: string) => { setCategory(v); const first = DOCUMENT_TYPES[v]?.[0]; setDocumentType(first?.value || "id_card"); setTaxCode(""); setExpiryDate(""); }}
-        documentType={documentType} setDocumentType={setDocumentType} year={year} setYear={setYear}
-        taxCode={taxCode} setTaxCode={setTaxCode} expiryDate={expiryDate} setExpiryDate={setExpiryDate}
-        file={file} setFile={setFile} submitting={submitting} message={message}
-        uploadDocument={uploadDocument} openDocument={openDocument} logout={logout} adminLoading={adminLoading}
-        expiringDocuments={expiringDocuments} expiredDocuments={expiredDocuments}
-        paymentType={paymentType} setPaymentType={setPaymentType} paymentMonth={paymentMonth} setPaymentMonth={setPaymentMonth}
-        paymentYear={paymentYear} setPaymentYear={setPaymentYear} paymentFile={paymentFile} setPaymentFile={setPaymentFile}
-        uploadPayment={uploadPayment}
-        communicationMode={communicationMode} setCommunicationMode={setCommunicationMode}
-        communicationEmployee={communicationEmployee} setCommunicationEmployee={setCommunicationEmployee}
-        communicationTitle={communicationTitle} setCommunicationTitle={setCommunicationTitle}
-        communicationMessage={communicationMessage} setCommunicationMessage={setCommunicationMessage}
-        sendCommunication={sendCommunication} deleteCommunication={deleteCommunication}
-        profileEmployee={profileEmployee} selectProfileEmployee={selectProfileEmployee}
-        employmentStartDate={employmentStartDate} setEmploymentStartDate={setEmploymentStartDate}
-        profilePhoto={profilePhoto} setProfilePhoto={setProfilePhoto} saveProfile={saveProfile} profiles={profiles}
-        attendanceEmployee={attendanceEmployee} selectAttendanceEmployee={selectAttendanceEmployee}
-        attendanceYear={attendanceYear} attendanceMonth={attendanceMonth} presentDays={presentDays} absentDays={absentDays}
-        setPresentDays={setPresentDays} setAbsentDays={setAbsentDays} loadAttendanceForm={loadAttendanceForm}
-        saveAttendance={saveAttendance} allAttendance={allAttendance}
-      />
-    );
-  }
+/* =====================================================
+CARICAMENTO
+===================================================== */
 
-  return <EmployeeArea employee={employee} profile={employeeProfile} photoUrl={employeePhotoUrl} documents={documents} communications={communications} attendance={attendance} openDocument={openDocument} logout={logout} session={session} />;
+useEffect(() => {
+if (!session) return;
+
+if (isAdmin) {
+loadAdminData();
+} else {
+loadEmployeeArea();
+}
+}, [session, isAdmin]);
+
+/* =====================================================
+LOGIN
+===================================================== */
+
+async function handleSubmit(
+e: React.FormEvent
+) {
+e.preventDefault();
+
+setMessage("");
+setSubmitting(true);
+
+if (loginMode) {
+const { error } =
+await supabase.auth.signInWithPassword({
+email,
+password,
+});
+
+if (error) {
+setMessage(
+"Email o password non corretti."
+);
+}
+} else {
+const { error } =
+await supabase.auth.signUp({
+email,
+password,
+});
+
+if (error) {
+setMessage(error.message);
+} else {
+setMessage(
+"Account creato. Controlla la tua email se è richiesta la conferma."
+);
+}
 }
 
-const loginPage: CSSProperties = {
-  minHeight: "100vh", background: "linear-gradient(135deg,#050b12,#0d202c,#07141f)",
-  display: "flex", alignItems: "center", justifyContent: "center", padding: 24, fontFamily: "Arial, sans-serif",
-};
-
-const logoBox: CSSProperties = {
-  width: 100, height: 100, margin: "0 auto 18px", borderRadius: 26,
-  background: "linear-gradient(135deg,#16c784,#61f3c1)", color: "#062019",
-  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 58, fontWeight: 900,
-  boxShadow: "0 0 45px rgba(22,199,132,.25)",
-};
-
-function LoadingScreen() {
-  return <div style={{ minHeight: "100vh", background: "#081521", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Arial,sans-serif" }}>
-    <div style={{ textAlign: "center" }}><div style={{ ...logoBox, width: 78, height: 78, fontSize: 45 }}>B</div><div style={{ color: "#b8c5cb", fontSize: 15 }}>Caricamento BARDOC PAY...</div></div>
-  </div>;
+setSubmitting(false);
 }
 
-function AdminDashboard(props: any) {
-  const {
-    activeSection, setActiveSection, employees, allEmployees, documents, payslips, paymentStatements, extras, bonuses,
-    communications, search, setSearch, selectedEmployee, setSelectedEmployee, category, setCategory, documentType, setDocumentType,
-    year, setYear, taxCode, setTaxCode, expiryDate, setExpiryDate, file, setFile, submitting, message, uploadDocument, openDocument,
-    logout, adminLoading, expiringDocuments, expiredDocuments, paymentType, setPaymentType, paymentMonth, setPaymentMonth,
-    paymentYear, setPaymentYear, paymentFile, setPaymentFile, uploadPayment, communicationMode, setCommunicationMode,
-    communicationEmployee, setCommunicationEmployee, communicationTitle, setCommunicationTitle, communicationMessage, setCommunicationMessage,
-    sendCommunication, deleteCommunication, profileEmployee, selectProfileEmployee, employmentStartDate, setEmploymentStartDate,
-    profilePhoto, setProfilePhoto, saveProfile, attendanceEmployee, selectAttendanceEmployee, attendanceYear, attendanceMonth,
-    presentDays, absentDays, setPresentDays, setAbsentDays, loadAttendanceForm, saveAttendance, allAttendance,
-  } = props;
+/* =====================================================
+LOGOUT
+===================================================== */
 
-  const title = activeSection === "dashboard" ? "Dashboard" : activeSection === "employees" ? "Dipendenti" : activeSection === "payments" ? "Gestione pagamenti" : activeSection === "documents" ? "Documenti" : activeSection === "communications" ? "Comunicazioni" : "Scadenze";
+async function logout() {
+await supabase.auth.signOut();
 
-  return <main style={{ minHeight: "100vh", background: "#0d1922", color: "#e9f0f2", fontFamily: "Arial,sans-serif", display: "flex" }}>
-    <aside style={{ width: 245, background: "#08141d", borderRight: "1px solid #20313b", padding: 20, boxSizing: "border-box", minHeight: "100vh", flexShrink: 0 }}>
-      <div style={{ fontSize: 20, fontWeight: 900 }}>BARDOC <span style={{ color: "#16c784" }}>PAY</span></div>
-      <div style={{ color: "#16c784", fontSize: 11, fontWeight: 800, marginTop: 4, marginBottom: 28 }}>AMMINISTRAZIONE</div>
-      {["dashboard", "employees", "payments", "documents", "communications", "deadlines"].map((id, i) => <SidebarButton key={id} active={activeSection === id} onClick={() => setActiveSection(id)}>{["🏠 Dashboard", "👥 Dipendenti", "💰 Gestione pagamenti", "📁 Documenti", "💬 Comunicazioni", "⚠️ Scadenze"][i]}</SidebarButton>)}
-      <div style={{ height: 1, background: "#20313b", margin: "25px 0" }} />
-      <div style={{ color: "#73838c", fontSize: 12 }}><span style={{ color: "#16c784" }}>●</span> Sistema operativo</div>
-      <button onClick={logout} style={{ ...secondaryButton, width: "100%", marginTop: 20 }}>Esci</button>
-    </aside>
+setSession(null);
+setEmployee(null);
+setDocuments([]);
+setEmployees([]);
+setAllDocuments([]);
+setCommunications([]);
+setAdminCommunications([]);
+setAttendance([]);
+setExtraPayments([]);
+setChatMessages([]);
 
-    <section style={{ flex: 1, padding: 28, boxSizing: "border-box", overflow: "auto" }}>
-      <header style={{ marginBottom: 24 }}><h1 style={{ margin: 0, fontSize: 27 }}>{title}</h1><div style={{ color: "#82919a", marginTop: 5, fontSize: 13 }}>Gestione del personale BARDOC SERVICE</div></header>
-
-      {activeSection === "dashboard" && <AdminHome allEmployees={allEmployees} documents={documents} payslips={payslips} communications={communications} setActiveSection={setActiveSection} />}
-
-      {activeSection === "employees" && <>
-        <div style={cardStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15, marginBottom: 18 }}>
-            <div><h2 style={{ margin: 0 }}>Gestione dipendenti</h2><div style={{ color: "#82919a", fontSize: 13, marginTop: 5 }}>Cerca per nome, email o codice fiscale.</div></div>
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Cerca dipendente..." style={{ ...inputStyle, maxWidth: 360 }} />
-          </div>
-          {adminLoading ? <div>Caricamento...</div> : employees.map((emp: Employee) => <div key={emp.id} style={{ borderTop: "1px solid #263841", padding: "15px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15 }}>
-            <div><strong>{emp.full_name}</strong><div style={{ color: "#778993", fontSize: 12, marginTop: 4 }}>{emp.email || "Nessuna email"}</div></div>
-            <button onClick={() => { selectProfileEmployee(emp.id); selectAttendanceEmployee(emp.id); }} style={secondaryButton}>Gestisci scheda</button>
-          </div>)}
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: 20 }}>
-          <h2 style={{ marginTop: 0 }}>👤 Profilo del dipendente</h2>
-          <Field label="Dipendente"><select value={profileEmployee} onChange={e => selectProfileEmployee(e.target.value)} style={selectStyle}><option value="">Seleziona dipendente</option>{allEmployees.map((e: Employee) => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></Field>
-          {profileEmployee && <>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <Field label="Data inizio collaborazione"><input type="date" value={employmentStartDate} onChange={e => setEmploymentStartDate(e.target.value)} style={inputStyle} /></Field>
-              <Field label="Foto dipendente"><input type="file" accept="image/*" onChange={e => setProfilePhoto(e.target.files?.[0] || null)} style={{ width: "100%", color: "#cbd6da" }} /></Field>
-            </div>
-            <button onClick={saveProfile} disabled={submitting} style={{ ...buttonStyle, marginTop: 20 }}>{submitting ? "SALVATAGGIO..." : "SALVA PROFILO"}</button>
-          </>}
-          {message && <Message text={message} />}
-        </div>
-
-        <div style={{ ...cardStyle, marginTop: 20 }}>
-          <h2 style={{ marginTop: 0 }}>📊 Presenze e assenze mensili</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <Field label="Dipendente"><select value={attendanceEmployee} onChange={e => selectAttendanceEmployee(e.target.value)} style={selectStyle}><option value="">Seleziona dipendente</option>{allEmployees.map((e: Employee) => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></Field>
-            <Field label="Anno"><select value={attendanceYear} onChange={e => loadAttendanceForm(Number(e.target.value), attendanceMonth)} style={selectStyle}>{YEARS.map(y => <option key={y} value={y}>{y}</option>)}</select></Field>
-            <Field label="Mese"><select value={attendanceMonth} onChange={e => loadAttendanceForm(attendanceYear, Number(e.target.value))} style={selectStyle}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></Field>
-            <Field label="Giorni di presenza"><input type="number" min={0} value={presentDays} onChange={e => setPresentDays(Number(e.target.value))} style={inputStyle} /></Field>
-            <Field label="Giorni di assenza"><input type="number" min={0} value={absentDays} onChange={e => setAbsentDays(Number(e.target.value))} style={inputStyle} /></Field>
-          </div>
-          <button onClick={saveAttendance} disabled={submitting} style={{ ...buttonStyle, marginTop: 20 }}>{submitting ? "SALVATAGGIO..." : "SALVA PRESENZE DEL MESE"}</button>
-          {attendanceEmployee && <AttendanceAdminTable employeeId={attendanceEmployee} allAttendance={allAttendance} />}
-        </div>
-      </>}
-
-      {activeSection === "payments" && <>
-        <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 18 }}><h2 style={{ margin: "0 0 7px" }}>Gestione pagamenti</h2><p style={{ margin: 0, color: "#a9b8c0" }}>Buste paga, distinte, extra e premi lavorativi, organizzati per dipendente, anno e mese.</p></div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 20 }}><Stat title="Buste paga" value={payslips.length} /><Stat title="Distinte" value={paymentStatements.length} /><Stat title="Extra" value={extras.length} /><Stat title="Premi" value={bonuses.length} /></div>
-        <div style={cardStyle}>
-          <h3 style={{ marginTop: 0 }}>Carica pagamento del mese</h3>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <Field label="Dipendente"><select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} style={selectStyle}><option value="">Seleziona dipendente</option>{allEmployees.map((e: Employee) => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></Field>
-            <Field label="Tipo documento"><select value={paymentType} onChange={e => setPaymentType(e.target.value)} style={selectStyle}>{PAYMENT_TYPES.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
-            <Field label="Anno"><select value={paymentYear} onChange={e => setPaymentYear(Number(e.target.value))} style={selectStyle}>{YEARS.map(y => <option key={y} value={y}>{y}</option>)}</select></Field>
-            <Field label="Mese"><select value={paymentMonth} onChange={e => setPaymentMonth(Number(e.target.value))} style={selectStyle}>{MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}</select></Field>
-          </div>
-          <Field label="PDF"><input type="file" accept="application/pdf,.pdf" onChange={e => setPaymentFile(e.target.files?.[0] || null)} style={{ width: "100%", color: "#cbd6da" }} /></Field>
-          <div style={{ marginTop: 10, color: "#81919a", fontSize: 12 }}>Extra e Premio lavorativo compariranno nell'area del dipendente soltanto se vengono effettivamente caricati.</div>
-          <button onClick={uploadPayment} disabled={submitting} style={{ ...buttonStyle, marginTop: 20 }}>{submitting ? "CARICAMENTO..." : "CARICA DOCUMENTO"}</button>
-          {message && <Message text={message} />}
-        </div>
-        <DocumentList title="Documenti di pagamento caricati" documents={documents.filter((d: DocumentRow) => ["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type))} employees={allEmployees} openDocument={openDocument} />
-      </>}
-
-      {activeSection === "documents" && <div style={cardStyle}>
-        <h2 style={{ margin: "0 0 6px" }}>Carica documento</h2><p style={{ margin: "0 0 10px", color: "#82919a", fontSize: 13 }}>Documenti anagrafici, contrattuali, permessi e curriculum.</p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <Field label="Dipendente"><select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)} style={selectStyle}><option value="">Seleziona dipendente</option>{allEmployees.map((e: Employee) => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></Field>
-          <Field label="Categoria"><select value={category} onChange={e => setCategory(e.target.value)} style={selectStyle}>{Object.entries(CATEGORY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></Field>
-          <Field label="Tipo documento"><select value={documentType} onChange={e => setDocumentType(e.target.value)} style={selectStyle}>{(DOCUMENT_TYPES[category] || []).map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select></Field>
-          <Field label="Anno"><select value={year} onChange={e => setYear(Number(e.target.value))} style={selectStyle}>{YEARS.map(y => <option key={y} value={y}>{y}</option>)}</select></Field>
-        </div>
-        {(documentType === "id_card" || documentType === "driver_license") && <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <Field label={documentType === "driver_license" ? "Codice Fiscale *" : "Codice Fiscale"}><input value={taxCode} onChange={e => setTaxCode(e.target.value.toUpperCase())} maxLength={16} style={inputStyle} /></Field>
-          <Field label="Data di scadenza"><input type="date" value={expiryDate} onChange={e => setExpiryDate(e.target.value)} style={inputStyle} /></Field>
-        </div>}
-        <Field label="Documento PDF"><input type="file" accept="application/pdf,.pdf" onChange={e => setFile(e.target.files?.[0] || null)} style={{ width: "100%", color: "#cbd6da" }} /></Field>
-        <button onClick={uploadDocument} disabled={submitting} style={{ ...buttonStyle, marginTop: 20 }}>{submitting ? "CARICAMENTO..." : "CARICA DOCUMENTO"}</button>
-        {message && <Message text={message} />}
-      </div>}
-
-      {activeSection === "communications" && <>
-        <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 18 }}><div style={{ color: "#16c784", fontSize: 12, fontWeight: 900 }}>COMUNICAZIONI</div><h2 style={{ margin: "8px 0" }}>Comunicazioni al personale</h2><p style={{ margin: 0, color: "#a9b8c0" }}>Messaggi individuali oppure comunicazioni generali a tutto il personale.</p></div>
-        <div style={cardStyle}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-            <ModeButton active={communicationMode === "individual"} onClick={() => setCommunicationMode("individual")}>👤 Comunicazione individuale</ModeButton>
-            <ModeButton active={communicationMode === "general"} onClick={() => setCommunicationMode("general")}>📢 Comunicazione generale</ModeButton>
-          </div>
-          {communicationMode === "individual" && <Field label="Dipendente destinatario"><select value={communicationEmployee} onChange={e => setCommunicationEmployee(e.target.value)} style={selectStyle}><option value="">Seleziona dipendente</option>{allEmployees.map((e: Employee) => <option key={e.id} value={e.id}>{e.full_name}</option>)}</select></Field>}
-          {communicationMode === "general" && <div style={{ padding: 14, borderRadius: 10, background: "#263a43", color: "#c7d5da", marginTop: 17, fontSize: 13 }}>📢 Questa comunicazione sarà visibile a tutti i dipendenti.</div>}
-          <Field label="Titolo"><input value={communicationTitle} onChange={e => setCommunicationTitle(e.target.value)} placeholder="Es. Comunicazione importante" style={inputStyle} /></Field>
-          <Field label="Messaggio"><textarea value={communicationMessage} onChange={e => setCommunicationMessage(e.target.value)} placeholder="Scrivi qui la comunicazione..." rows={7} style={{ ...inputStyle, resize: "vertical", fontFamily: "Arial,sans-serif" }} /></Field>
-          <button onClick={sendCommunication} disabled={submitting} style={{ ...buttonStyle, marginTop: 20 }}>{submitting ? "INVIO..." : communicationMode === "general" ? "INVIA A TUTTI I DIPENDENTI" : "INVIA AL DIPENDENTE"}</button>
-          {message && <Message text={message} />}
-        </div>
-        <div style={{ ...cardStyle, marginTop: 20 }}><h3 style={{ marginTop: 0 }}>Storico comunicazioni</h3>{communications.length === 0 ? <div style={{ color: "#82919a" }}>Nessuna comunicazione presente.</div> : communications.map((comm: Communication) => <CommunicationAdminCard key={comm.id} comm={comm} employees={allEmployees} onDelete={deleteCommunication} />)}</div>
-      </>}
-
-      {activeSection === "deadlines" && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}><Stat title="Documenti in scadenza" value={expiringDocuments.length} alert /><Stat title="Documenti scaduti" value={expiredDocuments.length} danger /></div><DeadlineList title="Documenti scaduti" items={expiredDocuments} danger employees={allEmployees} /><DeadlineList title="Documenti in scadenza entro 30 giorni" items={expiringDocuments} alert employees={allEmployees} /></>}
-    
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}><h2 style={{ marginTop: 0 }}>💬 Comunicazioni</h2>{communications.length === 0 ? <p style={{ color: "#81919a" }}>Non ci sono comunicazioni.</p> : <>{[...general, ...personal].map(c => <CommunicationCard key={c.id} communication={c} general={c.is_general} />)}</>}</div>
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
-        <p style={{ color: "#81919a", fontSize: 13, lineHeight: 1.6 }}>
-          Hai bisogno di assistenza o vuoi inviare una richiesta?
-          Premi il pulsante qui sotto: il messaggio verrà inviato direttamente
-          al Centro Messaggi dell'Amministrazione.
-        </p>
-
-        <button
-          onClick={() => setContactOpen(true)}
-          style={{ ...buttonStyle, width: "100%", marginTop: 10 }}
-        >
-          CONTATTA L'AMMINISTRAZIONE
-        </button>
-      </div>
-
-
-    </section>
-  
-      {contactOpen && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:999, padding:20 }}>
-          <div style={{ width:"100%", maxWidth:520, background:"#172630", border:"1px solid #2f4652", borderRadius:18, padding:24 }}>
-            <h2 style={{ marginTop:0 }}>Contatta l'Amministrazione</h2>
-            <p style={{ color:"#8ea0aa", fontSize:13, marginBottom:18 }}>
-              Invia una richiesta direttamente al Centro Messaggi dell'amministrazione.
-            </p>
-            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Oggetto" style={inputStyle}/>
-            <textarea value={contactMessage} onChange={e=>setContactMessage(e.target.value)} placeholder="Scrivi il messaggio..." rows={6} style={{...inputStyle,marginTop:12,resize:"vertical"}}/>
-            <div style={{ display:"flex", gap:12, marginTop:20 }}>
-              <button onClick={()=>setContactOpen(false)} style={{...secondaryButton,flex:1}}>Annulla</button>
-              <button onClick={sendAdminRequest} style={{...buttonStyle,flex:1}}>Invia</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-  </main>;
+setEmail("");
+setPassword("");
 }
 
-function AdminHome({ allEmployees, documents, payslips, communications, setActiveSection }: any) {
-  return <>
-    <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 20 }}><div style={{ color: "#16c784", fontSize: 12, fontWeight: 900 }}>AMMINISTRAZIONE</div><h2 style={{ margin: "8px 0" }}>Benvenuto in BARDOC PAY</h2><p style={{ color: "#a9b8c0", margin: 0 }}>Gestisci dipendenti, pagamenti, documenti, comunicazioni e presenze.</p></div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 20 }}><Stat title="Dipendenti attivi" value={allEmployees.length} /><Stat title="Documenti" value={documents.length} /><Stat title="Buste paga" value={payslips.length} /><Stat title="Comunicazioni" value={communications.length} /></div>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 }}>
-      <QuickCard title="Dipendenti" description="Gestisci foto, data di inizio collaborazione e presenze mensili." button="Apri dipendenti" onClick={() => setActiveSection("employees")} />
-      <QuickCard title="Gestione pagamenti" description="Carica buste paga, distinte, extra e premi lavorativi." button="Apri pagamenti" onClick={() => setActiveSection("payments")} />
-      <QuickCard title="Documenti" description="Carica documenti anagrafici e rapporto contrattuale." button="Apri documenti" onClick={() => setActiveSection("documents")} />
-      <QuickCard title="Comunicazioni" description="Invia messaggi individuali o generali e cancella quelli già inviati." button="Apri comunicazioni" onClick={() => setActiveSection("communications")} />
-    </div>
-  </>;
+/* =====================================================
+AREA DIPENDENTE
+===================================================== */
+
+async function loadEmployeeArea() {
+if (!session?.user?.id) return;
+
+const {
+data: emp,
+error: empError,
+} = await supabase
+.from("employees")
+.select("*")
+.eq(
+"auth_user_id",
+session.user.id
+)
+.maybeSingle();
+
+if (empError) {
+console.error(empError);
+return;
 }
 
-function SidebarButton({ active, onClick, children }: any) { return <button onClick={onClick} style={{ width: "100%", textAlign: "left", padding: "13px 12px", border: 0, borderRadius: 9, marginBottom: 5, background: active ? "#12332d" : "transparent", color: active ? "#16c784" : "#a9b7be", fontWeight: active ? 800 : 600, cursor: "pointer" }}>{children}</button>; }
-function ModeButton({ active, onClick, children }: any) { return <button onClick={onClick} style={{ padding: 15, borderRadius: 10, border: active ? "2px solid #16c784" : "1px solid #344955", background: active ? "#12342d" : "#101e28", color: "#fff", fontWeight: 800, cursor: "pointer" }}>{children}</button>; }
-function Stat({ title, value, alert, danger }: any) { return <div style={cardStyle}><div style={{ color: "#81919a", fontSize: 12, marginBottom: 10 }}>{title}</div><div style={{ fontSize: 29, fontWeight: 900, color: danger ? "#ff7777" : alert ? "#ffc857" : "#f2f6f7" }}>{value}</div></div>; }
-function QuickCard({ title, description, button, onClick }: any) { return <div style={cardStyle}><h3 style={{ margin: "0 0 8px" }}>{title}</h3><p style={{ color: "#82919a", fontSize: 13, lineHeight: 1.5, minHeight: 40 }}>{description}</p><button onClick={onClick} style={{ ...buttonStyle, marginTop: 8 }}>{button}</button></div>; }
+setEmployee(emp);
 
-function DocumentList({ title, documents, employees, openDocument }: any) {
-  return <div style={{ ...cardStyle, marginTop: 20 }}><h3 style={{ marginTop: 0 }}>{title}</h3>{documents.length === 0 ? <div style={{ color: "#81919a" }}>Nessun documento presente.</div> : documents.map((doc: DocumentRow) => {
-    const employee = employees.find((e: Employee) => e.id === doc.employee_id);
-    return <div key={doc.id} style={{ borderTop: "1px solid #293b45", padding: "15px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15 }}>
-      <div><strong>{employee?.full_name || "Dipendente"}</strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 4 }}>{documentLabel(doc.document_type)}</div><div style={{ color: "#81919a", fontSize: 12, marginTop: 4 }}>{doc.file_name} · {doc.month ? `${monthLabel(doc.month)} ${doc.year}` : doc.year}</div></div>
-      <button onClick={() => openDocument(doc)} style={{ ...secondaryButton, color: "#16c784" }}>Apri PDF</button>
-    </div>;
-  })}</div>;
+if (!emp) return;
+
+const { data: docs } =
+await supabase
+.from("documents")
+.select("*")
+.eq("employee_id", emp.id)
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
+
+setDocuments(docs || []);
+
+const {
+data: comms,
+error: commError,
+} = await supabase
+.from("communications")
+.select("*")
+.order("created_at", {
+ascending: false,
+});
+
+if (!commError) {
+setCommunications(
+comms || []
+);
 }
 
-function CommunicationAdminCard({ comm, employees, onDelete }: any) {
-  const target = comm.is_general ? "Tutti i dipendenti" : employees.find((e: Employee) => e.id === comm.employee_id)?.full_name || "Dipendente";
-  return <div style={{ borderTop: "1px solid #263841", padding: "16px 0" }}><div style={{ display: "flex", justifyContent: "space-between", gap: 15, alignItems: "flex-start" }}><div><strong>{comm.title}</strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 5 }}>{comm.is_general ? "📢 " : "👤 "}{target}</div></div><span style={{ color: "#71828c", fontSize: 11 }}>{formatCommunicationDate(comm.created_at)}</span></div><div style={{ color: "#b7c4ca", marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{comm.message}</div><button onClick={() => onDelete(comm.id)} style={{ ...secondaryButton, marginTop: 12, color: "#ff7777", borderColor: "#5b3333" }}>🗑 Cancella comunicazione</button></div>;
+/* PRESENZE */
+
+const {
+data: attendanceData,
+error: attendanceError,
+} = await supabase
+.from("attendance")
+.select("*")
+.eq("employee_id", emp.id)
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
+
+if (!attendanceError) {
+setAttendance(
+attendanceData || []
+);
 }
 
-function DeadlineList({ title, items, danger, alert, employees }: any) { return <div style={{ ...cardStyle, marginBottom: 20 }}><h3 style={{ marginTop: 0 }}>{title}</h3>{items.length === 0 ? <div style={{ color: "#81919a" }}>Nessun documento presente.</div> : items.map((doc: DocumentRow) => <div key={doc.id} style={{ borderTop: "1px solid #293b45", padding: "14px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><strong>{employees.find((e: Employee) => e.id === doc.employee_id)?.full_name || "Dipendente"}</strong><div style={{ color: "#81919a", fontSize: 12, marginTop: 4 }}>{documentLabel(doc.document_type)}</div></div><span style={{ color: danger ? "#ff7777" : alert ? "#ffc857" : "#16c784", fontWeight: 900 }}>{formatDate(doc.expiry_date)}</span></div>)}</div>; }
+/* EXTRA / PREMI */
 
-function AttendanceAdminTable({ employeeId, allAttendance }: any) {
-  const rows = allAttendance.filter((a: Attendance) => a.employee_id === employeeId).slice(0, 12);
-  return <div style={{ marginTop: 22 }}><h3>Ultimi mesi registrati</h3>{rows.length === 0 ? <div style={{ color: "#81919a" }}>Nessun mese registrato.</div> : rows.map((a: Attendance) => <div key={a.id} style={{ borderTop: "1px solid #293b45", padding: "10px 0", display: "flex", justifyContent: "space-between" }}><span>{monthLabel(a.month)} {a.year}</span><span><span style={{ color: "#16c784", fontWeight: 800 }}>{a.present_days} presenti</span> · <span style={{ color: "#ff5b66", fontWeight: 800 }}>{a.absent_days} assenti</span></span></div>)}</div>;
+const {
+data: extraData,
+error: extraError,
+} = await supabase
+.from("extra_payments")
+.select("*")
+.eq("employee_id", emp.id)
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
+
+if (!extraError) {
+setExtraPayments(
+extraData || []
+);
 }
 
-function AttendanceDonut({ present, absent }: { present: number; absent: number }) {
-  const total = present + absent;
-  if (total <= 0) return <div style={{ width: 120, height: 120, borderRadius: "50%", border: "12px solid #344955", display: "flex", alignItems: "center", justifyContent: "center", color: "#81919a", fontSize: 11, textAlign: "center" }}>Nessun dato</div>;
-  const pct = (present / total) * 100;
-  return <div style={{ width: 120, height: 120, borderRadius: "50%", background: `conic-gradient(#16c784 0 ${pct}%, #ff4d5a ${pct}% 100%)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><div style={{ width: 70, height: 70, borderRadius: "50%", background: "#172630", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: 14 }}>{Math.round(pct)}%</div></div>;
+/* CHAT */
+
+const {
+data: chatData,
+error: chatError,
+} = await supabase
+.from("chat_messages")
+.select("*")
+.eq("employee_id", emp.id)
+.order("created_at", {
+ascending: true,
+});
+
+if (!chatError) {
+setChatMessages(
+chatData || []
+);
+}
 }
 
-function EmployeeArea({ employee, profile, photoUrl, documents, communications, attendance, openDocument, logout, session }: any) {
-  const [openYears, setOpenYears] = useState<Record<number, boolean>>({});
-  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+/* =====================================================
+AREA ADMIN
+===================================================== */
 
-  const payments = documents.filter((d: DocumentRow) => ["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
-  const personalDocs = documents.filter((d: DocumentRow) => !["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
+async function loadAdminData() {
+setAdminLoading(true);
 
-  const startYear = profile?.employment_start_date ? Number(profile.employment_start_date.slice(0, 4)) : CURRENT_YEAR;
-  const documentYears = payments.map((d: DocumentRow) => d.year);
-  const attendanceYears = attendance.map((a: Attendance) => a.year);
-  const rangeYears = Array.from({ length: Math.max(1, CURRENT_YEAR - startYear + 1) }, (_, i) => CURRENT_YEAR - i);
-  const years = Array.from(new Set([...rangeYears, ...documentYears, ...attendanceYears])).sort((a, b) => b - a);
+const {
+data: employeeData,
+error: employeeError,
+} = await supabase
+.from("employees")
+.select("*")
+.eq("active", true)
+.order("full_name");
 
-  function yearData(y: number) {
-    const months = new Set<number>();
-    payments.filter((d: DocumentRow) => d.year === y && d.month).forEach((d: DocumentRow) => months.add(d.month as number));
-    attendance.filter((a: Attendance) => a.year === y).forEach((a: Attendance) => months.add(a.month));
-    return Array.from(months).sort((a, b) => b - a);
-  }
-
-  const general = communications.filter((c: Communication) => c.is_general);
-  const personal = communications.filter((c: Communication) => !c.is_general);
-
-  return <main style={{ minHeight: "100vh", background: "#0d1922", color: "#e9f0f2", fontFamily: "Arial,sans-serif" }}>
-    <header style={{ background: "#08141d", borderBottom: "1px solid #20313b", padding: "18px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-      <div><strong style={{ fontSize: 21 }}>BARDOC <span style={{ color: "#16c784" }}>PAY</span></strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 3 }}>AREA PERSONALE · TEAM BARDOC SERVICE</div></div>
-      <button onClick={logout} style={secondaryButton}>Esci</button>
-    </header>
-
-    <section style={{ maxWidth: 1180, margin: "0 auto", padding: 30 }}>
-      <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 20 }}>
-        <div style={{ color: "#16c784", fontSize: 12, fontWeight: 900 }}>AREA PERSONALE</div>
-        <h1 style={{ margin: "8px 0 3px", fontSize: 30 }}>TEAM BARDOC SERVICE</h1>
-        <div style={{ color: "#a9b8c0" }}>Benvenuto nel tuo portale BARDOC PAY</div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 18, marginBottom: 20 }}>
-        <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 22 }}>
-          {photoUrl ? <img src={photoUrl} alt="Foto dipendente" style={{ width: 145, height: 145, borderRadius: "50%", objectFit: "cover", border: "2px solid #16c784", flexShrink: 0 }} /> : <div style={{ width: 145, height: 145, borderRadius: "50%", background: "#12342d", color: "#16c784", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 54, fontWeight: 900, flexShrink: 0 }}>{employee?.full_name?.charAt(0)?.toUpperCase() || "B"}</div>}
-          <div><h2 style={{ margin: "0 0 12px", fontSize: 25 }}>{employee?.full_name || "Dipendente"}</h2><div style={{ color: "#c4d0d5", lineHeight: 1.6 }}>Collabora presso la struttura<br /><strong style={{ color: "#16c784" }}>BARDOC SERVICE</strong>{profile?.employment_start_date && <><br />dal <strong>{formatDate(profile.employment_start_date)}</strong></>}</div></div>
-        </div>
-        <div style={cardStyle}><h2 style={{ margin: "0 0 14px", color: "#16c784", fontSize: 18 }}>📊 Presenze mensili</h2><p style={{ marginTop: 0, color: "#81919a", fontSize: 12 }}>Ogni mese mostra separatamente giorni di presenza e assenza.</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{attendance.slice(0, 4).map((a: Attendance) => <MonthlyAttendanceMini key={a.id} a={a} />)}</div>{attendance.length === 0 && <div style={{ color: "#81919a" }}>Nessun dato di presenza ancora inserito.</div>}</div>
-      </div>
-      <div style={cardStyle}>
-        <h2 style={{ marginTop: 0 }}>💰 Retribuzione</h2>
-        <p style={{ color: "#81919a", fontSize: 13 }}>Apri un anno per visualizzare i mesi. Gli extra e i premi compaiono soltanto quando sono stati effettivamente caricati.</p>
-        {years.map(y => {
-          const months = yearData(y);
-          const isOpen = !!openYears[y];
-          return <div key={y} style={{ borderTop: "1px solid #293b45" }}>
-            <button onClick={() => setOpenYears(v => ({ ...v, [y]: !v[y] }))} style={{ width: "100%", padding: "17px 4px", border: 0, background: "transparent", color: "#16c784", display: "flex", justifyContent: "space-between", fontSize: 17, fontWeight: 900, cursor: "pointer" }}>{y}<span>{isOpen ? "⌃" : "⌄"}</span></button>
-            {isOpen && <div style={{ paddingBottom: 10 }}>{months.length === 0 ? <div style={{ color: "#81919a", padding: "0 4px 14px" }}>Nessun dato mensile presente.</div> : months.map(m => {
-              const key = `${y}-${m}`; const open = !!openMonths[key]; const monthDocs = payments.filter((d: DocumentRow) => d.year === y && d.month === m); const att = attendance.find((a: Attendance) => a.year === y && a.month === m);
-              return <div key={key} style={{ background: "#101e28", border: "1px solid #293c47", borderRadius: 13, margin: "8px 0", overflow: "hidden" }}>
-                <button onClick={() => setOpenMonths(v => ({ ...v, [key]: !v[key] }))} style={{ width: "100%", padding: 15, border: 0, background: "transparent", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}><strong>{monthLabel(m)}</strong><span>{open ? "−" : "+"}</span></button>
-                {open && <div style={{ borderTop: "1px solid #293c47", padding: 16 }}>
-                  {att && <div style={{ display: "flex", alignItems: "center", gap: 18, paddingBottom: 16, marginBottom: 10, borderBottom: "1px solid #293c47" }}><AttendanceDonut present={att.present_days} absent={att.absent_days} /><div><div style={{ color: "#16c784", fontWeight: 900 }}>🟢 {att.present_days} giorni di presenza</div><div style={{ color: "#ff5b66", fontWeight: 900, marginTop: 8 }}>🔴 {att.absent_days} giorni di assenza</div></div></div>}
-                  {(["payslip", "payment_statement", "extra", "work_bonus"] as string[]).map(type => monthDocs.filter((d: DocumentRow) => d.document_type === type).map((doc: DocumentRow) => <PaymentRow key={doc.id} doc={doc} openDocument={openDocument} />))}
-                  {monthDocs.length === 0 && <div style={{ color: "#81919a" }}>Nessun documento di pagamento per questo mese.</div>}
-                </div>}
-              </div>;
-            })}</div>}
-          </div>;
-        })}
-      </div>
-
-      <div style={{ ...cardStyle, marginTop: 20 }}><h2 style={{ marginTop: 0 }}>📁 I miei documenti</h2>{personalDocs.length === 0 ? <p style={{ color: "#81919a" }}>Non sono presenti documenti.</p> : personalDocs.map((doc: DocumentRow) => <PersonalDocumentRow key={doc.id} doc={doc} openDocument={openDocument} />)}</div>
-
-      <div style={{ marginTop: 20, padding: 16, background: "#13222c", borderRadius: 12, color: "#81919a", fontSize: 12 }}>Accesso effettuato come <strong style={{ color: "#dce6e9" }}>{session.user.email}</strong></div>
-    </section>
-  </main>;
+if (!employeeError) {
+setEmployees(
+employeeData || []
+);
 }
 
-function MonthlyAttendanceMini({ a }: { a: Attendance }) { return <div style={{ background: "#101e28", borderRadius: 10, padding: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><div><strong>{monthLabel(a.month)} {a.year}</strong><div style={{ fontSize: 11, marginTop: 5 }}><span style={{ color: "#16c784" }}>● {a.present_days} presenti</span><br /><span style={{ color: "#ff5b66" }}>● {a.absent_days} assenti</span></div></div><AttendanceDonut present={a.present_days} absent={a.absent_days} /></div>; }
-function PaymentRow({ doc, openDocument }: any) { const color = doc.document_type === "extra" || doc.document_type === "work_bonus" ? "#ffc857" : "#16c784"; return <div style={{ borderTop: "1px solid #293b45", padding: "13px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15 }}><div><strong style={{ color }}>{doc.document_type === "extra" ? "⭐ Extra" : doc.document_type === "work_bonus" ? "🏆 Premio lavorativo" : doc.document_type === "payslip" ? "📄 Busta paga" : "📄 Distinta di pagamento"}</strong><div style={{ color: "#81919a", fontSize: 11, marginTop: 4 }}>{doc.file_name}</div></div><button onClick={() => openDocument(doc)} style={{ ...secondaryButton, color: "#16c784" }}>Apri PDF</button></div>; }
-function PersonalDocumentRow({ doc, openDocument }: any) { return <div style={{ borderTop: "1px solid #293b45", padding: "14px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15 }}><div><strong>{documentLabel(doc.document_type)}</strong><div style={{ color: "#81919a", fontSize: 12, marginTop: 4 }}>{doc.file_name}</div>{doc.expiry_date && <div style={{ color: expiryStatus(doc.expiry_date) === "expired" ? "#ff7777" : expiryStatus(doc.expiry_date) === "warning" ? "#ffc857" : "#81919a", fontSize: 12, marginTop: 4 }}>Scadenza: {formatDate(doc.expiry_date)}</div>}</div><button onClick={() => openDocument(doc)} style={{ ...secondaryButton, color: "#16c784" }}>Apri PDF</button></div>; }
-function CommunicationCard({ communication, general }: any) { return <div style={{ borderTop: "1px solid #293b45", padding: "16px 0" }}><div style={{ display: "flex", justifyContent: "space-between", gap: 15 }}><div><strong>{general ? "📢 " : "👤 "}{communication.title}</strong><div style={{ color: "#16c784", fontSize: 11, fontWeight: 800, marginTop: 5 }}>{general ? "COMUNICAZIONE GENERALE" : "COMUNICAZIONE PERSONALE"}</div></div><span style={{ color: "#71828c", fontSize: 11 }}>{formatCommunicationDate(communication.created_at)}</span></div><div style={{ marginTop: 10, color: "#c4d0d5", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{communication.message}</div></div>; }
+const { data: docs } =
+await supabase
+.from("documents")
+.select("*")
+.order("year", {
+ascending: false,
+})
+.order("month", {
+ascending: false,
+});
+
+setAllDocuments(
+docs || []
+);
+
+const {
+data: comms,
+} =
+await supabase
+.from("communications")
+.select("*")
+.order("created_at", {
+ascending: false,
+});
+
+setAdminCommunications(
+comms || []
+);
+
+setAdminLoading(false);
+}
+
+/* =====================================================
+APRI DOCUMENTO
+===================================================== */
+
+async function openDocument(
+doc: Document
+) {
+const {
+data,
+error,
+} = await supabase.storage
+.from("payroll-documents")
+.createSignedUrl(
+doc.storage_path,
+300
+);
+
+if (error) {
+console.error(error);
+
+setMessage(
+"Impossibile aprire il documento."
+);
+
+return;
+}
+
+if (data?.signedUrl) {
+window.open(
+data.signedUrl,
+"_blank"
+);
+}
+}
+
+/* =====================================================
+RESET DOCUMENTO
+===================================================== */
+
+function resetDocumentForm() {
+setSelectedEmployee("");
+setCategory("retribuzione");
+setDocumentType("payslip");
+setMonth(
+new Date().getMonth() + 1
+);
+setYear(CURRENT_YEAR);
+setTaxCode("");
+setExpiryDate("");
+setFile(null);
+
+const input =
+document.getElementById(
+"document-file"
+) as HTMLInputElement | null;
+
+if (input) {
+input.value = "";
+}
+}
+
+/* =====================================================
+UPLOAD DOCUMENTO
+===================================================== */
+
+async function uploadDocument() {
+setMessage("");
+
+if (!selectedEmployee) {
+setMessage(
+"Seleziona un dipendente."
+);
+return;
+}
+
+if (!file) {
+setMessage(
+"Seleziona un file PDF."
+);
+return;
+}
+
+if (
+file.type !==
+"application/pdf"
+) {
+setMessage(
+"Il documento deve essere un PDF."
+);
+return;
+}
+
+const normalizedTaxCode =
+taxCode
+.trim()
+.toUpperCase();
+
+if (
+normalizedTaxCode &&
+!/^[A-Z0-9]{16}$/.test(
+normalizedTaxCode
+)
+) {
+setMessage(
+"Il Codice Fiscale deve contenere 16 caratteri alfanumerici."
+);
+return;
+}
+
+const requiresTaxCode =
+documentType ===
+"driver_license";
+
+const allowsExpiry =
+documentType ===
+"id_card" ||
+documentType ===
+"driver_license";
+
+if (
+requiresTaxCode &&
+!normalizedTaxCode
+) {
+setMessage(
+"Per la patente il Codice Fiscale è obbligatorio."
+);
+return;
+}
+
+if (
+allowsExpiry &&
+!expiryDate
+) {
+setMessage(
+"Inserisci la data di scadenza."
+);
+return;
+}
+
+setSubmitting(true);
+
+try {
+const safeFileName =
+file.name
+.replace(
+/[^\w.\- ]/g,
+""
+)
+.replace(
+/\s+/g,
+"_"
+);
+
+const storagePath =
+`${selectedEmployee}/${Date.now()}_${safeFileName}`;
+
+const {
+error: uploadError,
+} =
+await supabase.storage
+.from("payroll-documents")
+.upload(
+storagePath,
+file,
+{
+upsert: false,
+contentType:
+"application/pdf",
+}
+);
+
+if (uploadError) {
+throw uploadError;
+}
+
+const isPayroll =
+documentType ===
+"payslip" ||
+documentType ===
+"payment_statement";
+
+const {
+error: documentError,
+} =
+await supabase
+.from("documents")
+.insert({
+employee_id:
+selectedEmployee,
+document_type:
+documentType,
+month: isPayroll
+? month
+: null,
+year,
+file_name:
+file.name,
+storage_path:
+storagePath,
+tax_code:
+normalizedTaxCode ||
+null,
+expiry_date:
+expiryDate ||
+null,
+});
+
+if (documentError) {
+throw documentError;
+}
+
+setMessage(
+"Documento caricato correttamente. ✅"
+);
+
+resetDocumentForm();
+
+await loadAdminData();
+} catch (error: any) {
+console.error(error);
+
+setMessage(
+error?.message ||
+"Errore durante il caricamento del documento."
+);
+}
+
+setSubmitting(false);
+}
+
+/* =====================================================
+INVIA COMUNICAZIONE
+===================================================== */
+
+async function sendCommunication() {
+setMessage("");
+
+const title =
+communicationTitle.trim();
+
+const text =
+communicationMessage.trim();
+
+if (!title) {
+setMessage(
+"Inserisci il titolo della comunicazione."
+);
+return;
+}
+
+if (!text) {
+setMessage(
+"Inserisci il testo della comunicazione."
+);
+return;
+}
+
+if (
+communicationMode ===
+"individual" &&
+!communicationEmployee
+) {
+setMessage(
+"Seleziona il dipendente destinatario."
+);
+return;
+}
+
+setSubmitting(true);
+
+try {
+const {
+error,
+} =
+await supabase
+.from("communications")
+.insert({
+employee_id:
+communicationMode ===
+"individual"
+? communicationEmployee
+: null,
+
+title,
+
+message: text,
+
+is_general:
+communicationMode ===
+"general",
+});
+
+if (error) {
+throw error;
+}
+
+setCommunicationTitle("");
+setCommunicationMessage("");
+setCommunicationEmployee("");
+
+setMessage(
+communicationMode ===
+"general"
+? "Comunicazione generale inviata a tutti i dipendenti. ✅"
+: "Comunicazione inviata al dipendente selezionato. ✅"
+);
+
+await loadAdminData();
+} catch (error: any) {
+console.error(error);
+
+setMessage(
+error?.message ||
+"Errore durante l'invio della comunicazione."
+);
+}
+
+setSubmitting(false);
+}
+
+/* =====================================================
+CHAT DIPENDENTE
+===================================================== */
+
+async function sendEmployeeChatMessage() {
+if (!employee) return;
+
+const text =
+chatInput.trim();
+
+if (!text) return;
+
+setSubmitting(true);
+
+try {
+const {
+error,
+} =
+await supabase
+.from("chat_messages")
+.insert({
+employee_id:
+employee.id,
+
+sender_role:
+"employee",
+
+sender_user_id:
+session?.user?.id ||
+null,
+
+message: text,
+});
+
+if (error) {
+throw error;
+}
+
+setChatInput("");
+
+const {
+data,
+} =
+await supabase
+.from("chat_messages")
+.select("*")
+.eq(
+"employee_id",
+employee.id
+)
+.order("created_at", {
+ascending: true,
+});
+
+setChatMessages(
+data || []
+);
+} catch (error: any) {
+console.error(error);
+
+setMessage(
+error?.message ||
+"Impossibile inviare il messaggio."
+);
+}
+
+setSubmitting(false);
+}
+
+/* =====================================================
+FILTRO DIPENDENTI
+===================================================== */
+
+const filteredEmployees =
+useMemo(() => {
+const q =
+search
+.trim()
+.toLowerCase();
+
+if (!q) {
+return employees;
+}
+
+return employees.filter(
+(emp) =>
+emp.full_name
+.toLowerCase()
+.includes(q) ||
+(
+emp.email || ""
+)
+.toLowerCase()
+.includes(q)
+);
+}, [
+search,
+employees,
+]);
+
+/* =====================================================
+PAGAMENTI
+===================================================== */
+
+const payslips =
+useMemo(
+() =>
+allDocuments.filter(
+(doc) =>
+doc.document_type ===
+"payslip"
+),
+[allDocuments]
+);
+
+const paymentStatements =
+useMemo(
+() =>
+allDocuments.filter(
+(doc) =>
+doc.document_type ===
+"payment_statement"
+),
+[allDocuments]
+);
+
+/* =====================================================
+SCADENZE
+===================================================== */
+
+const expiringDocuments =
+useMemo(() => {
+return allDocuments
+.map((doc) => ({
+doc,
+employee:
+employees.find(
+(emp) =>
+emp.id ===
+doc.employee_id
+),
+}))
+.filter(
+({ doc }) =>
+expiryStatus(
+doc.expiry_date
+) === "warning"
+);
+}, [
+allDocuments,
+employees,
+]);
+
+const expiredDocuments =
+useMemo(() => {
+return allDocuments
+.map((doc) => ({
+doc,
+employee:
+employees.find(
+(emp) =>
+emp.id ===
+doc.employee_id
+),
+}))
+.filter(
+({ doc }) =>
+expiryStatus(
+doc.expiry_date
+) === "expired"
+);
+}, [
+allDocuments,
+employees,
+]);
+
+/* =====================================================
+LOADING
+===================================================== */
+
+if (loading) {
+return (
+<div
+style={{
+minHeight: "100vh",
+background: "#081521",
+color: "#fff",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+fontFamily:
+"Arial, sans-serif",
+}}
+>
+<div
+style={{
+textAlign: "center",
+}}
+>
+<div
+style={{
+width: 80,
+height: 80,
+borderRadius: 22,
+background:
+"linear-gradient(135deg,#16c784,#61f3c1)",
+color: "#062019",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+fontSize: 46,
+fontWeight: 900,
+margin:
+"0 auto 18px",
+}}
+>
+B
+</div>
+
+<div
+style={{
+color: "#b8c5cb",
+}}
+>
+Caricamento BARDOC PAY...
+</div>
+</div>
+</div>
+);
+}
+
+/* =====================================================
+LOGIN
+===================================================== */
+
+if (!session) {
+return (
+<LoginScreen
+email={email}
+password={password}
+setEmail={setEmail}
+setPassword={setPassword}
+loginMode={loginMode}
+setLoginMode={setLoginMode}
+submitting={submitting}
+message={message}
+handleSubmit={handleSubmit}
+/>
+);
+}
+
+/* =====================================================
+ADMIN
+===================================================== */
+
+if (isAdmin) {
+return (
+<AdminDashboard
+activeSection={activeSection}
+setActiveSection={
+setActiveSection
+}
+employees={
+filteredEmployees
+}
+allEmployees={
+employees
+}
+documents={
+allDocuments
+}
+payslips={
+payslips
+}
+paymentStatements={
+paymentStatements
+}
+communications={
+adminCommunications
+}
+search={search}
+setSearch={setSearch}
+selectedEmployee={
+selectedEmployee
+}
+setSelectedEmployee={
+setSelectedEmployee
+}
+category={category}
+setCategory={(value: string) => {
+setCategory(value);
+
+const first =
+(
+DOCUMENT_TYPES as any
+)[value]?.[0];
+
+setDocumentType(
+first?.value ||
+"payslip"
+);
+
+setTaxCode("");
+setExpiryDate("");
+}}
+documentType={
+documentType
+}
+setDocumentType={
+setDocumentType
+}
+month={month}
+setMonth={setMonth}
+year={year}
+setYear={setYear}
+taxCode={taxCode}
+setTaxCode={setTaxCode}
+expiryDate={
+expiryDate
+}
+setExpiryDate={
+setExpiryDate
+}
+file={file}
+setFile={setFile}
+submitting={
+submitting
+}
+message={message}
+uploadDocument={
+uploadDocument
+}
+openDocument={
+openDocument
+}
+logout={logout}
+adminLoading={
+adminLoading
+}
+expiringDocuments={
+expiringDocuments
+}
+expiredDocuments={
+expiredDocuments
+}
+communicationMode={
+communicationMode
+}
+setCommunicationMode={
+setCommunicationMode
+}
+communicationEmployee={
+communicationEmployee
+}
+setCommunicationEmployee={
+setCommunicationEmployee
+}
+communicationTitle={
+communicationTitle
+}
+setCommunicationTitle={
+setCommunicationTitle
+}
+communicationMessage={
+communicationMessage
+}
+setCommunicationMessage={
+setCommunicationMessage
+}
+sendCommunication={
+sendCommunication
+}
+/>
+);
+}
+
+/* =====================================================
+DIPENDENTE
+===================================================== */
+
+return (
+<EmployeeArea
+employee={employee}
+documents={documents}
+communications={
+communications
+}
+attendance={attendance}
+extraPayments={
+extraPayments
+}
+chatMessages={
+chatMessages
+}
+chatInput={chatInput}
+setChatInput={
+setChatInput
+}
+sendChatMessage={
+sendEmployeeChatMessage
+}
+openDocument={
+openDocument
+}
+logout={logout}
+session={session}
+/>
+);
+}
+
+/* =========================================================
+LOGIN SCREEN
+========================================================= */
+
+function LoginScreen({
+email,
+password,
+setEmail,
+setPassword,
+loginMode,
+setLoginMode,
+submitting,
+message,
+handleSubmit,
+}: any) {
+return (
+<main
+style={{
+minHeight: "100vh",
+background:
+"radial-gradient(circle at top,#153b45,#07141f 55%,#050b12)",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+padding: 24,
+fontFamily:
+"Arial, sans-serif",
+}}
+>
+<div
+style={{
+width: "100%",
+maxWidth: 450,
+background:
+"rgba(17,30,40,.96)",
+border:
+"1px solid #2a3b47",
+borderRadius: 28,
+padding: 40,
+boxShadow:
+"0 30px 90px rgba(0,0,0,.5)",
+color: "#fff",
+}}
+>
+<div
+style={{
+textAlign: "center",
+}}
+>
+<div
+style={{
+width: 100,
+height: 100,
+margin:
+"0 auto 18px",
+borderRadius: 27,
+background:
+"linear-gradient(135deg,#16c784,#61f3c1)",
+color: "#062019",
+display: "flex",
+alignItems: "center",
+justifyContent: "center",
+fontSize: 58,
+fontWeight: 900,
+boxShadow:
+"0 0 45px rgba(22,199,132,.25)",
+}}
+>
+B
+</div>
+
+<div
+style={{
+color: "#16c784",
+fontWeight: 900,
+letterSpacing: 2,
+fontSize: 13,
+}}
+>
+BARDOC SERVICE
+</div>
+
+<h1
+style={{
+margin:
+"8px 0 5px",
+fontSize: 30,
+}}
+>
+BARDOC PAY
+</h1>
+
+<p
+style={{
+color: "#9daab2",
+margin:
+"0 0 28px",
+}}
+>
+Portale digitale del personale
+</p>
+</div>
+
+<form
+onSubmit={handleSubmit}
+style={{
+display: "flex",
+flexDirection:
+"column",
+gap: 14,
+}}
+>
+<input
+type="email"
+placeholder="Email"
+value={email}
+onChange={(e) =>
+setEmail(
+e.target.value
+)
+}
+required
+style={darkInput}
+/>
+
+<input
+type="password"
+placeholder="Password"
+value={password}
+onChange={(e) =>
+setPassword(
+e.target.value
+)
+}
+required
+style={darkInput}
+/>
+
+<button
+type="submit"
+disabled={submitting}
+style={{
+...greenButton,
+opacity:
+submitting
+? 0.6
+: 1,
+}}
+>
+{submitting
+? "ATTENDERE..."
+: loginMode
+? "ACCEDI AL PORTALE"
+: "CREA ACCOUNT"}
+</button>
+</form>
+
+<button
+type="button"
+onClick={() => {
+setLoginMode(
+!loginMode
+);
+}}
+style={{
+width: "100%",
+marginTop: 20,
+border: "none",
+background:
+"transparent",
+color: "#16c784",
+fontWeight: 700,
+cursor: "pointer",
+}}
+>
+{loginMode
+? "Non hai ancora un account? Registrati"
+: "Hai già un account? Accedi"}
+</button>
+
+{message && (
+<Message text={message} />
+)}
+</div>
+</main>
+);
+}
+
+/* =========================================================
+ADMIN DASHBOARD
+========================================================= */
+
+function AdminDashboard({
+activeSection,
+setActiveSection,
+employees,
+allEmployees,
+documents,
+payslips,
+paymentStatements,
+communications,
+search,
+setSearch,
+selectedEmployee,
+setSelectedEmployee,
+category,
+setCategory,
+documentType,
+setDocumentType,
+month,
+setMonth,
+year,
+setYear,
+taxCode,
+setTaxCode,
+expiryDate,
+setExpiryDate,
+file,
+setFile,
+submitting,
+message,
+uploadDocument,
+openDocument,
+logout,
+adminLoading,
+expiringDocuments,
+expiredDocuments,
+communicationMode,
+setCommunicationMode,
+communicationEmployee,
+setCommunicationEmployee,
+communicationTitle,
+setCommunicationTitle,
+communicationMessage,
+setCommunicationMessage,
+sendCommunication,
+}: any) {
+const isPersonal =
+category ===
+"personali";
+
+const requiresTaxCode =
+documentType ===
+"driver_license";
+
+const allowsExpiry =
+documentType ===
+"id_card" ||
+documentType ===
+"driver_license";
+
+return (
+<main
+style={{
+minHeight: "100vh",
+background: "#0d1922",
+color: "#e9f0f2",
+fontFamily:
+"Arial, sans-serif",
+display: "flex",
+}}
+>
+<aside
+style={{
+width: 250,
+background: "#08141d",
+borderRight:
+"1px solid #20313b",
+padding: 20,
+minHeight: "100vh",
+boxSizing:
+"border-box",
+flexShrink: 0,
+}}
+>
+<div
+style={{
+fontSize: 20,
+fontWeight: 900,
+}}
+>
+BARDOC{" "}
+<span
+style={{
+color: "#16c784",
+}}
+>
+PAY
+</span>
+</div>
+
+<div
+style={{
+color: "#16c784",
+fontSize: 11,
+fontWeight: 800,
+marginTop: 4,
+marginBottom: 28,
+}}
+>
+AMMINISTRAZIONE
+</div>
+
+<SidebarButton
+active={
+activeSection ===
+"dashboard"
+}
+onClick={() =>
+setActiveSection(
+"dashboard"
+)
+}
+>
+🏠 Dashboard
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"employees"
+}
+onClick={() =>
+setActiveSection(
+"employees"
+)
+}
+>
+👥 Dipendenti
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"payments"
+}
+onClick={() =>
+setActiveSection(
+"payments"
+)
+}
+>
+💰 Gestione pagamenti
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"documents"
+}
+onClick={() =>
+setActiveSection(
+"documents"
+)
+}
+>
+📁 Documenti
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"communications"
+}
+onClick={() =>
+setActiveSection(
+"communications"
+)
+}
+>
+💬 Comunicazioni
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"deadlines"
+}
+onClick={() =>
+setActiveSection(
+"deadlines"
+)
+}
+>
+⚠️ Scadenze
+</SidebarButton>
+
+<div
+style={{
+height: 1,
+background:
+"#20313b",
+margin:
+"25px 0",
+}}
+/>
+
+<div
+style={{
+color: "#73838c",
+fontSize: 12,
+}}
+>
+<span
+style={{
+color: "#16c784",
+}}
+>
+●
+</span>{" "}
+Sistema operativo
+</div>
+
+<button
+onClick={logout}
+style={{
+...secondaryButton,
+width: "100%",
+marginTop: 20,
+}}
+>
+Esci
+</button>
+</aside>
+
+<section
+style={{
+flex: 1,
+padding: 28,
+boxSizing:
+"border-box",
+overflow: "auto",
+}}
+>
+<header
+style={{
+marginBottom: 24,
+}}
+>
+<h1
+style={{
+margin: 0,
+fontSize: 28,
+}}
+>
+{activeSection ===
+"dashboard"
+? "Dashboard"
+: activeSection ===
+"employees"
+? "Dipendenti"
+: activeSection ===
+"payments"
+? "Gestione pagamenti"
+: activeSection ===
+"documents"
+? "Documenti"
+: activeSection ===
+"communications"
+? "Comunicazioni"
+: "Scadenze"}
+</h1>
+
+<div
+style={{
+color: "#82919a",
+marginTop: 5,
+fontSize: 13,
+}}
+>
+Gestione del personale BARDOC SERVICE
+</div>
+</header>
+
+{/* =================================================
+DASHBOARD
+================================================= */}
+
+{activeSection ===
+"dashboard" && (
+<>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius: 20,
+padding: 28,
+marginBottom: 20,
+border:
+"1px solid #263b47",
+}}
+>
+<div
+style={{
+color: "#16c784",
+fontSize: 12,
+fontWeight: 900,
+}}
+>
+AMMINISTRAZIONE
+</div>
+
+<h2
+style={{
+margin:
+"8px 0",
+fontSize: 29,
+}}
+>
+Benvenuto in BARDOC PAY
+</h2>
+
+<p
+style={{
+color:
+"#a9b8c0",
+margin: 0,
+}}
+>
+Gestisci tutto il personale
+BARDOC SERVICE da un unico
+portale.
+</p>
+</div>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"repeat(4,minmax(0,1fr))",
+gap: 14,
+marginBottom: 20,
+}}
+>
+<Stat
+title="Dipendenti attivi"
+value={
+allEmployees.length
+}
+/>
+
+<Stat
+title="Documenti"
+value={
+documents.length
+}
+/>
+
+<Stat
+title="Buste paga"
+value={
+payslips.length
+}
+/>
+
+<Stat
+title="Comunicazioni"
+value={
+communications.length
+}
+/>
+</div>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"repeat(2,minmax(0,1fr))",
+gap: 16,
+}}
+>
+<QuickCard
+title="Gestione pagamenti"
+description="Carica e consulta buste paga e distinte di pagamento."
+button="Apri gestione pagamenti"
+onClick={() =>
+setActiveSection(
+"payments"
+)
+}
+/>
+
+<QuickCard
+title="Documenti"
+description="Gestisci documenti anagrafici e rapporto contrattuale."
+button="Apri documenti"
+onClick={() =>
+setActiveSection(
+"documents"
+)
+}
+/>
+
+<QuickCard
+title="Comunicazioni"
+description="Invia comunicazioni individuali o generali."
+button="Apri comunicazioni"
+onClick={() =>
+setActiveSection(
+"communications"
+)
+}
+/>
+
+<QuickCard
+title="Scadenze"
+description="Controlla documenti in scadenza e scaduti."
+button="Controlla scadenze"
+onClick={() =>
+setActiveSection(
+"deadlines"
+)
+}
+/>
+</div>
+</>
+)}
+
+{/* =================================================
+DIPENDENTI
+================================================= */}
+
+{activeSection ===
+"employees" && (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 22,
+}}
+>
+<div
+style={{
+display: "flex",
+justifyContent:
+"space-between",
+gap: 15,
+marginBottom: 18,
+}}
+>
+<div>
+<h2
+style={{
+margin: 0,
+}}
+>
+Gestione dipendenti
+</h2>
+
+<div
+style={{
+color:
+"#82919a",
+fontSize: 13,
+marginTop: 5,
+}}
+>
+Cerca per nome o email.
+</div>
+</div>
+
+<input
+value={search}
+onChange={(e) =>
+setSearch(
+e.target.value
+)
+}
+placeholder="Cerca dipendente..."
+style={{
+...darkInput,
+maxWidth: 360,
+}}
+/>
+</div>
+
+{adminLoading ? (
+<div>
+Caricamento...
+</div>
+) : (
+employees.map(
+(
+emp: Employee
+) => (
+<div
+key={emp.id}
+style={{
+borderTop:
+"1px solid #263841",
+padding:
+"15px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+}}
+>
+<div
+style={{
+display:
+"flex",
+alignItems:
+"center",
+gap: 14,
+}}
+>
+<EmployeeAvatar
+employee={emp}
+size={48}
+/>
+
+<div>
+<strong>
+{
+emp.full_name
+}
+</strong>
+
+<div
+style={{
+color:
+"#778993",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{emp.email ||
+"Nessuna email"}
+</div>
+
+{emp.hire_date && (
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+11,
+marginTop:
+4,
+}}
+>
+Dal{" "}
+{formatDate(
+emp.hire_date
+)}
+</div>
+)}
+</div>
+</div>
+
+<span
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+fontWeight:
+800,
+}}
+>
+Attivo
+</span>
+</div>
+)
+)
+)}
+</div>
+)}
+
+{/* =================================================
+PAGAMENTI
+================================================= */}
+
+{activeSection ===
+"payments" && (
+<>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius: 18,
+padding: 24,
+marginBottom: 18,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 7px",
+}}
+>
+Gestione pagamenti
+</h2>
+
+<p
+style={{
+margin: 0,
+color:
+"#a9b8c0",
+}}
+>
+Carica buste paga e distinte
+di pagamento.
+</p>
+</div>
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 24,
+}}
+>
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 16,
+}}
+>
+<Field label="Dipendente">
+<select
+value={
+selectedEmployee
+}
+onChange={(e) =>
+setSelectedEmployee(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+<option value="">
+Seleziona dipendente
+</option>
+
+{allEmployees.map(
+(
+emp: Employee
+) => (
+<option
+key={
+emp.id
+}
+value={
+emp.id
+}
+>
+{
+emp.full_name
+}
+</option>
+)
+)}
+</select>
+</Field>
+
+<Field label="Tipo">
+<select
+value={
+documentType
+}
+onChange={(e) =>
+setDocumentType(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+<option value="payslip">
+Busta paga
+</option>
+
+<option value="payment_statement">
+Distinta di pagamento
+</option>
+</select>
+</Field>
+
+<Field label="Anno">
+<select
+value={year}
+onChange={(e) =>
+setYear(
+Number(
+e.target.value
+)
+)
+}
+style={
+darkSelect
+}
+>
+{YEARS.map(
+(y) => (
+<option
+key={y}
+value={y}
+>
+{y}
+</option>
+)
+)}
+</select>
+</Field>
+
+<Field label="Mese">
+<select
+value={month}
+onChange={(e) =>
+setMonth(
+Number(
+e.target.value
+)
+)
+}
+style={
+darkSelect
+}
+>
+{MONTHS.map(
+(
+name,
+index
+) => (
+<option
+key={name}
+value={
+index + 1
+}
+>
+{name}
+</option>
+)
+)}
+</select>
+</Field>
+</div>
+
+<Field label="PDF">
+<input
+id="document-file"
+type="file"
+accept="application/pdf,.pdf"
+onChange={(e) =>
+setFile(
+e.target.files?.[0] ||
+null
+)
+}
+style={{
+width:
+"100%",
+color:
+"#cbd6da",
+}}
+/>
+</Field>
+
+<button
+onClick={
+uploadDocument
+}
+disabled={
+submitting
+}
+style={{
+...greenButton,
+marginTop: 20,
+}}
+>
+{submitting
+? "CARICAMENTO..."
+: "CARICA DOCUMENTO"}
+</button>
+
+{message && (
+<Message
+text={message}
+/>
+)}
+</div>
+
+<DocumentList
+title="Buste paga caricate"
+documents={
+payslips
+}
+employees={
+allEmployees
+}
+openDocument={
+openDocument
+}
+/>
+
+<DocumentList
+title="Distinte di pagamento caricate"
+documents={
+paymentStatements
+}
+employees={
+allEmployees
+}
+openDocument={
+openDocument
+}
+/>
+</>
+)}
+
+{/* =================================================
+DOCUMENTI
+================================================= */}
+
+{activeSection ===
+"documents" && (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 24,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 5px",
+}}
+>
+Carica documento
+</h2>
+
+<p
+style={{
+color:
+"#82919a",
+fontSize: 13,
+}}
+>
+Documenti anagrafici, contrattuali,
+permessi e curriculum.
+</p>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 16,
+}}
+>
+<Field label="Dipendente">
+<select
+value={
+selectedEmployee
+}
+onChange={(e) =>
+setSelectedEmployee(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+<option value="">
+Seleziona dipendente
+</option>
+
+{allEmployees.map(
+(
+emp: Employee
+) => (
+<option
+key={emp.id}
+value={emp.id}
+>
+{
+emp.full_name
+}
+</option>
+)
+)}
+</select>
+</Field>
+
+<Field label="Categoria">
+<select
+value={
+category
+}
+onChange={(e) =>
+setCategory(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+{Object.entries(
+CATEGORY_LABELS
+).map(
+([
+value,
+label,
+]) => (
+<option
+key={
+value
+}
+value={
+value
+}
+>
+{label}
+</option>
+)
+)}
+</select>
+</Field>
+
+<Field label="Tipo documento">
+<select
+value={
+documentType
+}
+onChange={(e) =>
+setDocumentType(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+{(
+(
+DOCUMENT_TYPES as any
+)[category] ||
+[]
+).map(
+(
+item: any
+) => (
+<option
+key={
+item.value
+}
+value={
+item.value
+}
+>
+{
+item.label
+}
+</option>
+)
+)}
+</select>
+</Field>
+
+<Field label="Anno">
+<select
+value={year}
+onChange={(e) =>
+setYear(
+Number(
+e.target.value
+)
+)
+}
+style={
+darkSelect
+}
+>
+{YEARS.map(
+(y) => (
+<option
+key={y}
+value={y}
+>
+{y}
+</option>
+)
+)}
+</select>
+</Field>
+
+{isPersonal && (
+<Field
+label={
+requiresTaxCode
+? "Codice Fiscale *"
+: "Codice Fiscale"
+}
+>
+<input
+value={
+taxCode
+}
+onChange={(e) =>
+setTaxCode(
+e.target.value.toUpperCase()
+)
+}
+maxLength={16}
+style={
+darkInput
+}
+/>
+</Field>
+)}
+
+{allowsExpiry && (
+<Field
+label="Data di scadenza"
+>
+<input
+type="date"
+value={
+expiryDate
+}
+onChange={(e) =>
+setExpiryDate(
+e.target.value
+)
+}
+style={
+darkInput
+}
+/>
+</Field>
+)}
+</div>
+
+<Field label="Documento PDF">
+<input
+id="document-file"
+type="file"
+accept="application/pdf,.pdf"
+onChange={(e) =>
+setFile(
+e.target.files?.[0] ||
+null
+)
+}
+style={{
+width:
+"100%",
+color:
+"#cbd6da",
+}}
+/>
+</Field>
+
+<button
+onClick={
+uploadDocument
+}
+disabled={
+submitting
+}
+style={{
+...greenButton,
+marginTop: 20,
+}}
+>
+{submitting
+? "CARICAMENTO..."
+: "CARICA DOCUMENTO"}
+</button>
+
+{message && (
+<Message
+text={message}
+/>
+)}
+</div>
+)}
+
+{/* =================================================
+COMUNICAZIONI
+================================================= */}
+
+{activeSection ===
+"communications" && (
+<>
+<div
+style={{
+background:
+"linear-gradient(135deg,#07141f,#102d39)",
+borderRadius: 18,
+padding: 24,
+marginBottom: 18,
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontSize: 12,
+fontWeight: 900,
+}}
+>
+COMUNICAZIONI
+</div>
+
+<h2
+style={{
+margin:
+"8px 0",
+}}
+>
+Comunicazioni al personale
+</h2>
+
+<p
+style={{
+margin: 0,
+color:
+"#a9b8c0",
+}}
+>
+Comunicazioni individuali o
+generali.
+</p>
+</div>
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 24,
+marginBottom: 20,
+}}
+>
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 12,
+}}
+>
+<button
+onClick={() =>
+setCommunicationMode(
+"individual"
+)
+}
+style={{
+padding: 15,
+borderRadius: 10,
+border:
+communicationMode ===
+"individual"
+? "2px solid #16c784"
+: "1px solid #344955",
+background:
+communicationMode ===
+"individual"
+? "#12342d"
+: "#101e28",
+color: "#fff",
+fontWeight: 800,
+cursor: "pointer",
+}}
+>
+👤 Comunicazione individuale
+</button>
+
+<button
+onClick={() =>
+setCommunicationMode(
+"general"
+)
+}
+style={{
+padding: 15,
+borderRadius: 10,
+border:
+communicationMode ===
+"general"
+? "2px solid #16c784"
+: "1px solid #344955",
+background:
+communicationMode ===
+"general"
+? "#12342d"
+: "#101e28",
+color: "#fff",
+fontWeight: 800,
+cursor: "pointer",
+}}
+>
+📢 Comunicazione generale
+</button>
+</div>
+
+{communicationMode ===
+"individual" && (
+<Field
+label="Dipendente destinatario"
+>
+<select
+value={
+communicationEmployee
+}
+onChange={(e) =>
+setCommunicationEmployee(
+e.target.value
+)
+}
+style={
+darkSelect
+}
+>
+<option value="">
+Seleziona dipendente
+</option>
+
+{allEmployees.map(
+(
+emp: Employee
+) => (
+<option
+key={
+emp.id
+}
+value={
+emp.id
+}
+>
+{
+emp.full_name
+}
+</option>
+)
+)}
+</select>
+</Field>
+)}
+
+<Field label="Titolo">
+<input
+value={
+communicationTitle
+}
+onChange={(e) =>
+setCommunicationTitle(
+e.target.value
+)
+}
+placeholder="Titolo comunicazione"
+style={
+darkInput
+}
+/>
+</Field>
+
+<Field label="Messaggio">
+<textarea
+value={
+communicationMessage
+}
+onChange={(e) =>
+setCommunicationMessage(
+e.target.value
+)
+}
+rows={6}
+placeholder="Scrivi la comunicazione..."
+style={{
+...darkInput,
+resize:
+"vertical",
+fontFamily:
+"Arial, sans-serif",
+}}
+/>
+</Field>
+
+<button
+onClick={
+sendCommunication
+}
+disabled={
+submitting
+}
+style={{
+...greenButton,
+marginTop: 20,
+}}
+>
+{communicationMode ===
+"general"
+? "INVIA A TUTTI"
+: "INVIA AL DIPENDENTE"}
+</button>
+
+{message && (
+<Message
+text={message}
+/>
+)}
+</div>
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 22,
+}}
+>
+<h3
+style={{
+marginTop: 0,
+}}
+>
+Storico comunicazioni
+</h3>
+
+{communications.length ===
+0 ? (
+<div
+style={{
+color:
+"#82919a",
+}}
+>
+Nessuna comunicazione.
+</div>
+) : (
+communications.map(
+(
+comm: Communication
+) => {
+const target =
+comm.is_general
+? "Tutti i dipendenti"
+: allEmployees.find(
+(
+emp: Employee
+) =>
+emp.id ===
+comm.employee_id
+)
+?.full_name ||
+"Dipendente";
+
+return (
+<div
+key={
+comm.id
+}
+style={{
+borderTop:
+"1px solid #263841",
+padding:
+"16px 0",
+}}
+>
+<strong>
+{comm.title}
+</strong>
+
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+marginTop:
+5,
+}}
+>
+{comm.is_general
+? "📢 Tutti i dipendenti"
+: `👤 ${target}`}
+</div>
+
+<div
+style={{
+color:
+"#b7c4ca",
+marginTop:
+10,
+whiteSpace:
+"pre-wrap",
+}}
+>
+{
+comm.message
+}
+</div>
+
+<div
+style={{
+color:
+"#71828c",
+fontSize:
+11,
+marginTop:
+8,
+}}
+>
+{formatCommunicationDate(
+comm.created_at
+)}
+</div>
+</div>
+);
+}
+)
+)}
+</div>
+</>
+)}
+
+{/* =================================================
+SCADENZE
+================================================= */}
+
+{activeSection ===
+"deadlines" && (
+<>
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 16,
+}}
+>
+<Stat
+title="In scadenza"
+value={
+expiringDocuments.length
+}
+alert
+/>
+
+<Stat
+title="Scaduti"
+value={
+expiredDocuments.length
+}
+danger
+/>
+</div>
+
+<DeadlineList
+title="Documenti scaduti"
+items={
+expiredDocuments
+}
+danger
+/>
+
+<DeadlineList
+title="Documenti in scadenza entro 30 giorni"
+items={
+expiringDocuments
+}
+alert
+/>
+</>
+)}
+</section>
+</main>
+);
+}
+
+/* =========================================================
+AREA PERSONALE DIPENDENTE
+========================================================= */
+
+function EmployeeArea({
+employee,
+documents,
+communications,
+attendance,
+extraPayments,
+chatMessages,
+chatInput,
+setChatInput,
+sendChatMessage,
+openDocument,
+logout,
+session,
+}: any) {
+const [openYears, setOpenYears] =
+useState<Record<number, boolean>>(
+{}
+);
+
+const [openMonths, setOpenMonths] =
+useState<Record<string, boolean>>(
+{}
+);
+
+const generalCommunications =
+communications.filter(
+(item: Communication) =>
+item.is_general
+);
+
+const personalCommunications =
+communications.filter(
+(item: Communication) =>
+!item.is_general
+);
+
+/* =====================================================
+ANNI PRESENTI
+===================================================== */
+
+const years = useMemo(() => {
+const set =
+new Set<number>();
+
+documents.forEach(
+(doc: Document) => {
+if (
+doc.document_type ===
+"payslip" ||
+doc.document_type ===
+"payment_statement"
+) {
+set.add(doc.year);
+}
+}
+);
+
+attendance.forEach(
+(item: Attendance) => {
+set.add(item.year);
+}
+);
+
+extraPayments.forEach(
+(item: ExtraPayment) => {
+set.add(item.year);
+}
+);
+
+if (
+employee?.hire_date
+) {
+set.add(
+Number(
+employee.hire_date.slice(
+0,
+4
+)
+)
+);
+}
+
+return Array.from(set).sort(
+(a, b) => b - a
+);
+}, [
+documents,
+attendance,
+extraPayments,
+employee,
+]);
+
+function toggleYear(year: number) {
+setOpenYears((prev) => ({
+...prev,
+[year]: !prev[year],
+}));
+}
+
+function toggleMonth(
+year: number,
+month: number
+) {
+const key =
+`${year}-${month}`;
+
+setOpenMonths((prev) => ({
+...prev,
+[key]: !prev[key],
+}));
+}
+
+return (
+<main
+style={{
+minHeight: "100vh",
+background:
+"linear-gradient(180deg,#07141f,#0d1922)",
+color: "#e9f0f2",
+fontFamily:
+"Arial, sans-serif",
+}}
+>
+{/* =================================================
+HEADER
+================================================= */}
+
+<header
+style={{
+background:
+"rgba(8,20,29,.96)",
+borderBottom:
+"1px solid #20313b",
+padding:
+"18px 28px",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+position:
+"sticky",
+top: 0,
+zIndex: 10,
+backdropFilter:
+"blur(12px)",
+}}
+>
+<div>
+<strong
+style={{
+fontSize: 21,
+letterSpacing: .3,
+}}
+>
+BARDOC{" "}
+<span
+style={{
+color:
+"#16c784",
+}}
+>
+PAY
+</span>
+</strong>
+
+<div
+style={{
+color:
+"#16c784",
+fontSize: 12,
+marginTop: 3,
+fontWeight: 800,
+letterSpacing: 1,
+}}
+>
+AREA PERSONALE
+</div>
+</div>
+
+<button
+onClick={logout}
+style={
+secondaryButton
+}
+>
+Esci
+</button>
+</header>
+
+<section
+style={{
+maxWidth: 1120,
+margin:
+"0 auto",
+padding:
+"34px 24px 60px",
+}}
+>
+{/* =================================================
+HERO PROFILO
+================================================= */}
+
+<div
+style={{
+background:
+"linear-gradient(135deg,#0c292b,#102d39 55%,#07141f)",
+border:
+"1px solid #29454b",
+borderRadius: 28,
+padding:
+"34px 30px",
+marginBottom: 20,
+boxShadow:
+"0 25px 70px rgba(0,0,0,.25)",
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontSize: 12,
+fontWeight: 900,
+letterSpacing:
+2,
+marginBottom:
+10,
+}}
+>
+AREA PERSONALE
+</div>
+
+<div
+style={{
+fontSize: 16,
+color:
+"#b6c6cc",
+fontWeight:
+700,
+letterSpacing:
+1,
+}}
+>
+TEAM BARDOC SERVICE
+</div>
+
+<div
+style={{
+marginTop: 26,
+display:
+"flex",
+alignItems:
+"center",
+gap: 22,
+flexWrap:
+"wrap",
+}}
+>
+<EmployeeAvatar
+employee={
+employee
+}
+size={112}
+/>
+
+<div>
+<h1
+style={{
+margin:
+"0 0 8px",
+fontSize:
+34,
+letterSpacing:
+-.5,
+}}
+>
+{employee?.full_name ||
+"Dipendente"}
+</h1>
+
+<div
+style={{
+color:
+"#a9b8c0",
+fontSize:
+14,
+}}
+>
+Collabora presso la struttura
+</div>
+
+<div
+style={{
+marginTop:
+5,
+color:
+"#16c784",
+fontSize:
+16,
+fontWeight:
+900,
+}}
+>
+BARDOC SERVICE
+</div>
+
+<div
+style={{
+marginTop:
+9,
+color:
+"#899ba4",
+fontSize:
+13,
+}}
+>
+Dal{" "}
+<strong
+style={{
+color:
+"#dce7ea",
+}}
+>
+{formatDate(
+employee?.hire_date
+)}
+</strong>
+</div>
+</div>
+</div>
+</div>
+
+{/* =================================================
+RIEPILOGO PRESENZE
+================================================= */}
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+20,
+padding:
+24,
+marginBottom:
+20,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 5px",
+}}
+>
+Presenze
+</h2>
+
+<p
+style={{
+margin:
+"0 0 20px",
+color:
+"#82919a",
+fontSize:
+13,
+}}
+>
+Riepilogo mensile delle presenze e delle assenze.
+</p>
+
+{attendance.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun dato di presenza disponibile.
+</div>
+) : (
+<div
+style={{
+display:
+"grid",
+gridTemplateColumns:
+"repeat(auto-fit,minmax(250px,1fr))",
+gap: 16,
+}}
+>
+{attendance
+.slice()
+.sort(
+(
+a: Attendance,
+b: Attendance
+) =>
+b.year -
+a.year ||
+b.month -
+a.month
+)
+.map(
+(
+item: Attendance
+) => (
+<AttendanceCard
+key={
+item.id
+}
+item={
+item
+}
+/>
+)
+)}
+</div>
+)}
+</div>
+
+{/* =================================================
+RETRIBUZIONE PER ANNO
+================================================= */}
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+20,
+padding:
+24,
+marginBottom:
+20,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 5px",
+}}
+>
+💶 Retribuzione
+</h2>
+
+<p
+style={{
+margin:
+"0 0 20px",
+color:
+"#82919a",
+fontSize:
+13,
+}}
+>
+Seleziona l'anno per visualizzare i mesi.
+</p>
+
+{years.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun documento di pagamento presente.
+</div>
+) : (
+years.map(
+(
+selectedYear: number
+) => {
+const yearOpen =
+!!openYears[
+selectedYear
+];
+
+return (
+<div
+key={
+selectedYear
+}
+style={{
+border:
+"1px solid #2c414b",
+borderRadius:
+14,
+marginBottom:
+12,
+overflow:
+"hidden",
+}}
+>
+<button
+onClick={() =>
+toggleYear(
+selectedYear
+)
+}
+style={{
+width:
+"100%",
+border:
+"none",
+background:
+yearOpen
+? "#12342d"
+: "#101e28",
+color:
+"#fff",
+padding:
+"17px 18px",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+cursor:
+"pointer",
+fontWeight:
+900,
+fontSize:
+16,
+}}
+>
+<span>
+📅{" "}
+{selectedYear}
+</span>
+
+<span
+style={{
+color:
+"#16c784",
+}}
+>
+{yearOpen
+? "−"
+: "+"}
+</span>
+</button>
+
+{yearOpen && (
+<div
+style={{
+padding:
+12,
+}}
+>
+{MONTHS.map(
+(
+monthName,
+index
+) => {
+const monthNumber =
+index +
+1;
+
+const monthDocs =
+documents.filter(
+(
+doc: Document
+) =>
+doc.year ===
+selectedYear &&
+doc.month ===
+monthNumber &&
+(
+doc.document_type ===
+"payslip" ||
+doc.document_type ===
+"payment_statement"
+)
+);
+
+const monthExtra =
+extraPayments.filter(
+(
+extra: ExtraPayment
+) =>
+extra.year ===
+selectedYear &&
+extra.month ===
+monthNumber
+);
+
+const monthAttendance =
+attendance.find(
+(
+item: Attendance
+) =>
+item.year ===
+selectedYear &&
+item.month ===
+monthNumber
+);
+
+if (
+monthDocs.length ===
+0 &&
+monthExtra.length ===
+0 &&
+!monthAttendance
+) {
+return null;
+}
+
+const key =
+`${selectedYear}-${monthNumber}`;
+
+const isOpen =
+!!openMonths[
+key
+];
+
+const payslip =
+monthDocs.find(
+(
+doc: Document
+) =>
+doc.document_type ===
+"payslip"
+);
+
+const statement =
+monthDocs.find(
+(
+doc: Document
+) =>
+doc.document_type ===
+"payment_statement"
+);
+
+return (
+<div
+key={
+monthName
+}
+style={{
+border:
+"1px solid #2a3d46",
+borderRadius:
+12,
+marginBottom:
+8,
+overflow:
+"hidden",
+}}
+>
+<button
+onClick={() =>
+toggleMonth(
+selectedYear,
+monthNumber
+)
+}
+style={{
+width:
+"100%",
+border:
+"none",
+background:
+isOpen
+? "#132a2b"
+: "#0f1d26",
+color:
+"#fff",
+padding:
+"14px 16px",
+display:
+"flex",
+justifyContent:
+"space-between",
+cursor:
+"pointer",
+}}
+>
+<strong>
+{monthName}
+</strong>
+
+<span
+style={{
+color:
+"#16c784",
+}}
+>
+{isOpen
+? "▲"
+: "▼"}
+</span>
+</button>
+
+{isOpen && (
+<div
+style={{
+padding:
+15,
+display:
+"flex",
+flexDirection:
+"column",
+gap:
+10,
+}}
+>
+{payslip && (
+<PaymentRow
+label="Busta paga"
+onClick={() =>
+openDocument(
+payslip
+)
+}
+/>
+)}
+
+{statement && (
+<PaymentRow
+label="Distinta di pagamento"
+onClick={() =>
+openDocument(
+statement
+)
+}
+/>
+)}
+
+{monthExtra.map(
+(
+extra: ExtraPayment
+) => (
+<div
+key={
+extra.id
+}
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+padding:
+"12px 14px",
+borderRadius:
+10,
+background:
+"#102b25",
+border:
+"1px solid #205544",
+}}
+>
+<div>
+<strong
+style={{
+color:
+"#16c784",
+}}
+>
+{extra.description ||
+"Premio lavorativo"}
+</strong>
+</div>
+
+<strong>
+{money(
+Number(
+extra.amount
+)
+)}
+</strong>
+</div>
+)
+)}
+
+{monthAttendance && (
+<div
+style={{
+marginTop:
+5,
+padding:
+12,
+background:
+"#101e28",
+borderRadius:
+10,
+color:
+"#9babb2",
+fontSize:
+12,
+}}
+>
+Presenze:{" "}
+<strong
+style={{
+color:
+"#16c784",
+}}
+>
+{
+monthAttendance.present_days
+}
+</strong>{" "}
+· Assenze:{" "}
+<strong
+style={{
+color:
+"#ff6868",
+}}
+>
+{
+monthAttendance.absent_days
+}
+</strong>
+</div>
+)}
+</div>
+)}
+</div>
+);
+}
+)}
+</div>
+)}
+</div>
+);
+}
+)
+)}
+</div>
+
+{/* =================================================
+COMUNICAZIONI
+================================================= */}
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+20,
+padding:
+24,
+marginBottom:
+20,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 5px",
+}}
+>
+💬 Comunicazioni
+</h2>
+
+<p
+style={{
+margin:
+"0 0 18px",
+color:
+"#82919a",
+fontSize:
+13,
+}}
+>
+Comunicazioni ricevute dall'amministrazione.
+</p>
+
+{communications.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Non ci sono comunicazioni.
+</div>
+) : (
+<>
+{generalCommunications.map(
+(
+comm: Communication
+) => (
+<CommunicationCard
+key={
+comm.id
+}
+communication={
+comm
+}
+general
+/>
+)
+)}
+
+{personalCommunications.map(
+(
+comm: Communication
+) => (
+<CommunicationCard
+key={
+comm.id
+}
+communication={
+comm
+}
+/>
+)
+)}
+</>
+)}
+</div>
+
+{/* =================================================
+CHAT
+================================================= */}
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+20,
+padding:
+24,
+marginBottom:
+20,
+}}
+>
+<h2
+style={{
+margin:
+"0 0 5px",
+}}
+>
+💬 Contatta l'amministrazione
+</h2>
+
+<p
+style={{
+margin:
+"0 0 18px",
+color:
+"#82919a",
+fontSize:
+13,
+}}
+>
+Puoi scrivere direttamente all'amministrazione.
+I messaggi resteranno registrati nello storico.
+</p>
+
+<div
+style={{
+background:
+"#0e1b24",
+border:
+"1px solid #263b45",
+borderRadius:
+14,
+padding:
+16,
+minHeight:
+250,
+maxHeight:
+450,
+overflowY:
+"auto",
+}}
+>
+{chatMessages.length ===
+0 ? (
+<div
+style={{
+textAlign:
+"center",
+color:
+"#71828c",
+padding:
+"80px 20px",
+}}
+>
+Nessun messaggio.
+<br />
+Scrivi il primo messaggio all'amministrazione.
+</div>
+) : (
+chatMessages.map(
+(
+chat: ChatMessage
+) => {
+const mine =
+chat.sender_role ===
+"employee";
+
+return (
+<div
+key={
+chat.id
+}
+style={{
+display:
+"flex",
+justifyContent:
+mine
+? "flex-end"
+: "flex-start",
+marginBottom:
+12,
+}}
+>
+<div
+style={{
+maxWidth:
+"78%",
+background:
+mine
+? "#123f34"
+: "#263842",
+border:
+mine
+? "1px solid #1c6755"
+: "1px solid #364b55",
+borderRadius:
+mine
+? "16px 16px 4px 16px"
+: "16px 16px 16px 4px",
+padding:
+"11px 14px",
+}}
+>
+<div
+style={{
+fontSize:
+11,
+color:
+mine
+? "#16c784"
+: "#9db0b8",
+fontWeight:
+800,
+marginBottom:
+5,
+}}
+>
+{mine
+? "TU"
+: "AMMINISTRAZIONE"}
+</div>
+
+<div
+style={{
+whiteSpace:
+"pre-wrap",
+lineHeight:
+1.5,
+color:
+"#e1e9eb",
+}}
+>
+{
+chat.message
+}
+</div>
+
+<div
+style={{
+fontSize:
+10,
+color:
+"#70828a",
+marginTop:
+6,
+textAlign:
+"right",
+}}
+>
+{formatCommunicationDate(
+chat.created_at
+)}
+</div>
+</div>
+</div>
+);
+}
+)
+)}
+</div>
+
+<div
+style={{
+display:
+"flex",
+gap:
+10,
+marginTop:
+14,
+}}
+>
+<textarea
+value={
+chatInput
+}
+onChange={(e) =>
+setChatInput(
+e.target.value
+)
+}
+placeholder="Scrivi un messaggio all'amministrazione..."
+rows={3}
+style={{
+...darkInput,
+resize:
+"vertical",
+fontFamily:
+"Arial, sans-serif",
+}}
+/>
+
+<button
+onClick={
+sendChatMessage
+}
+disabled={
+!chatInput.trim()
+}
+style={{
+...greenButton,
+width:
+160,
+alignSelf:
+"stretch",
+}}
+>
+INVIA
+</button>
+</div>
+</div>
+
+{/* =================================================
+DOCUMENTI
+================================================= */}
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+20,
+padding:
+24,
+}}
+>
+<h2
+style={{
+marginTop:
+0,
+}}
+>
+📁 I miei documenti
+</h2>
+
+{documents.length ===
+0 ? (
+<p
+style={{
+color:
+"#81919a",
+}}
+>
+Non sono presenti documenti.
+</p>
+) : (
+documents.map(
+(
+doc: Document
+) => (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"16px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+}}
+>
+<div>
+<strong>
+{documentLabel(
+doc.document_type
+)}
+</strong>
+
+<div
+style={{
+color:
+"#82919a",
+fontSize:
+12,
+marginTop:
+5,
+}}
+>
+{
+doc.file_name
+}
+
+{doc.month
+? ` · ${doc.month}/${doc.year}`
+: ` · ${doc.year}`}
+</div>
+
+{doc.expiry_date && (
+<div
+style={{
+marginTop:
+5,
+color:
+expiryStatus(
+doc.expiry_date
+) ===
+"expired"
+? "#ff7777"
+: expiryStatus(
+doc.expiry_date
+) ===
+"warning"
+? "#ffc857"
+: "#81919a",
+fontSize:
+12,
+fontWeight:
+700,
+}}
+>
+Scadenza:{" "}
+{formatDate(
+doc.expiry_date
+)}
+</div>
+)}
+</div>
+
+<button
+onClick={() =>
+openDocument(
+doc
+)
+}
+style={{
+...greenButton,
+width:
+"auto",
+padding:
+"10px 16px",
+}}
+>
+Apri PDF
+</button>
+</div>
+)
+)
+)}
+</div>
+
+<div
+style={{
+marginTop:
+20,
+padding:
+16,
+background:
+"#13222c",
+borderRadius:
+12,
+color:
+"#81919a",
+fontSize:
+12,
+}}
+>
+Accesso effettuato come{" "}
+<strong
+style={{
+color:
+"#dce6e9",
+}}
+>
+{session.user.email}
+</strong>
+</div>
+</section>
+</main>
+);
+}
+
+/* =========================================================
+AVATAR DIPENDENTE
+========================================================= */
+
+function EmployeeAvatar({
+employee,
+size = 80,
+}: {
+employee: Employee | null;
+size?: number;
+}) {
+if (
+employee?.photo_url
+) {
+return (
+<img
+src={
+employee.photo_url
+}
+alt=""
+style={{
+width:
+size,
+height:
+size,
+borderRadius:
+"50%",
+objectFit:
+"cover",
+border:
+"3px solid #16c784",
+boxShadow:
+"0 0 25px rgba(22,199,132,.18)",
+}}
+/>
+);
+}
+
+return (
+<div
+style={{
+width:
+size,
+height:
+size,
+borderRadius:
+"50%",
+background:
+"linear-gradient(135deg,#16c784,#0e7460)",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
+color:
+"#062019",
+fontSize:
+size * 0.38,
+fontWeight:
+900,
+border:
+"3px solid #16c784",
+}}
+>
+{employee?.full_name
+?.charAt(0)
+.toUpperCase() ||
+"B"}
+</div>
+);
+}
+
+/* =========================================================
+PRESENZE — GRAFICO A TORTA
+========================================================= */
+
+function AttendanceCard({
+item,
+}: {
+item: Attendance;
+}) {
+const total =
+item.present_days +
+item.absent_days;
+
+const presentPercentage =
+total > 0
+? (item.present_days /
+total) *
+100
+: 0;
+
+const absentPercentage =
+total > 0
+? (item.absent_days /
+total) *
+100
+: 0;
+
+return (
+<div
+style={{
+background:
+"#101e28",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+18,
+display:
+"flex",
+alignItems:
+"center",
+gap:
+20,
+}}
+>
+<div
+style={{
+width: 105,
+height: 105,
+borderRadius:
+"50%",
+background:
+`conic-gradient(#16c784 0% ${presentPercentage}%, #ef5555 ${presentPercentage}% 100%)`,
+position:
+"relative",
+flexShrink:
+0,
+}}
+>
+<div
+style={{
+position:
+"absolute",
+inset: 12,
+borderRadius:
+"50%",
+background:
+"#101e28",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
+flexDirection:
+"column",
+}}
+>
+<strong
+style={{
+color:
+"#16c784",
+fontSize:
+20,
+}}
+>
+{Math.round(
+presentPercentage
+)}%
+</strong>
+
+<span
+style={{
+color:
+"#71828c",
+fontSize:
+9,
+}}
+>
+PRESENZA
+</span>
+</div>
+</div>
+
+<div>
+<strong
+style={{
+fontSize:
+16,
+}}
+>
+{MONTHS[
+item.month - 1
+]}{" "}
+{item.year}
+</strong>
+
+<div
+style={{
+marginTop:
+10,
+fontSize:
+13,
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+marginBottom:
+5,
+}}
+>
+● Presenze:{" "}
+<strong>
+{
+item.present_days
+}
+</strong>
+</div>
+
+<div
+style={{
+color:
+"#ef5555",
+}}
+>
+● Assenze:{" "}
+<strong>
+{
+item.absent_days
+}
+</strong>
+</div>
+</div>
+</div>
+</div>
+);
+}
+
+/* =========================================================
+PAGAMENTO
+========================================================= */
+
+function PaymentRow({
+label,
+onClick,
+}: {
+label: string;
+onClick: () => void;
+}) {
+return (
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+background:
+"#101e28",
+border:
+"1px solid #293c47",
+borderRadius:
+10,
+padding:
+"12px 14px",
+}}
+>
+<strong>
+{label}
+</strong>
+
+<button
+onClick={
+onClick
+}
+style={{
+background:
+"#16c784",
+border:
+"none",
+borderRadius:
+8,
+padding:
+"8px 13px",
+color:
+"#062019",
+fontWeight:
+900,
+cursor:
+"pointer",
+}}
+>
+Apri PDF
+</button>
+</div>
+);
+}
+
+/* =========================================================
+COMUNICAZIONE
+========================================================= */
+
+function CommunicationCard({
+communication,
+general,
+}: {
+communication: Communication;
+general?: boolean;
+}) {
+return (
+<div
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"16px 0",
+}}
+>
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+gap:
+15,
+}}
+>
+<div>
+<strong
+style={{
+fontSize:
+16,
+}}
+>
+{general
+? "📢 "
+: "👤 "}
+{
+communication.title
+}
+</strong>
+
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+11,
+fontWeight:
+800,
+marginTop:
+5,
+}}
+>
+{general
+? "COMUNICAZIONE GENERALE"
+: "COMUNICAZIONE PERSONALE"}
+</div>
+</div>
+
+<span
+style={{
+color:
+"#71828c",
+fontSize:
+11,
+}}
+>
+{formatCommunicationDate(
+communication.created_at
+)}
+</span>
+</div>
+
+<div
+style={{
+marginTop:
+10,
+color:
+"#c4d0d5",
+lineHeight:
+1.6,
+whiteSpace:
+"pre-wrap",
+}}
+>
+{
+communication.message
+}
+</div>
+</div>
+);
+}
+
+/* =========================================================
+SIDEBAR
+========================================================= */
+
+function SidebarButton({
+active,
+onClick,
+children,
+}: any) {
+return (
+<button
+onClick={onClick}
+style={{
+width:
+"100%",
+textAlign:
+"left",
+padding:
+"13px 12px",
+border:
+"none",
+borderRadius:
+9,
+marginBottom:
+5,
+background:
+active
+? "#12332d"
+: "transparent",
+color:
+active
+? "#16c784"
+: "#a9b7be",
+fontWeight:
+active
+? 800
+: 600,
+cursor:
+"pointer",
+}}
+>
+{children}
+</button>
+);
+}
+
+/* =========================================================
+STAT
+========================================================= */
+
+function Stat({
+title,
+value,
+alert,
+danger,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+14,
+padding:
+20,
+}}
+>
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginBottom:
+10,
+}}
+>
+{title}
+</div>
+
+<div
+style={{
+fontSize:
+29,
+fontWeight:
+900,
+color:
+danger
+? "#ff7777"
+: alert
+? "#ffc857"
+: "#f2f6f7",
+}}
+>
+{value}
+</div>
+</div>
+);
+}
+
+/* =========================================================
+QUICK CARD
+========================================================= */
+
+function QuickCard({
+title,
+description,
+button,
+onClick,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+}}
+>
+<h3
+style={{
+margin:
+"0 0 8px",
+}}
+>
+{title}
+</h3>
+
+<p
+style={{
+color:
+"#82919a",
+fontSize:
+13,
+lineHeight:
+1.5,
+minHeight:
+40,
+}}
+>
+{description}
+</p>
+
+<button
+onClick={onClick}
+style={{
+...greenButton,
+marginTop: 8,
+}}
+>
+{button}
+</button>
+</div>
+);
+}
+
+/* =========================================================
+FIELD
+========================================================= */
+
+function Field({
+label,
+children,
+}: any) {
+return (
+<div
+style={{
+marginTop:
+17,
+}}
+>
+<label
+style={{
+display:
+"block",
+color:
+"#aebbc2",
+fontSize:
+12,
+fontWeight:
+700,
+marginBottom:
+7,
+}}
+>
+{label}
+</label>
+
+{children}
+</div>
+);
+}
+
+/* =========================================================
+MESSAGE
+========================================================= */
+
+function Message({
+text,
+}: {
+text: string;
+}) {
+return (
+<div
+style={{
+marginTop:
+15,
+padding:
+13,
+borderRadius:
+9,
+background:
+"#12342d",
+color:
+"#b9f3de",
+fontSize:
+13,
+}}
+>
+{text}
+</div>
+);
+}
+
+/* =========================================================
+DOCUMENT LIST
+========================================================= */
+
+function DocumentList({
+title,
+documents,
+employees,
+openDocument,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+marginTop:
+20,
+}}
+>
+<h3
+style={{
+marginTop:
+0,
+}}
+>
+{title}
+</h3>
+
+{documents.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun documento presente.
+</div>
+) : (
+documents.map(
+(
+doc: Document
+) => {
+const employee =
+employees.find(
+(
+emp: Employee
+) =>
+emp.id ===
+doc.employee_id
+);
+
+return (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"15px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+}}
+>
+<div>
+<strong>
+{
+employee?.full_name ||
+"Dipendente"
+}
+</strong>
+
+<div
+style={{
+color:
+"#16c784",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</div>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{doc.file_name}
+{doc.month
+? ` · ${doc.month}/${doc.year}`
+: ` · ${doc.year}`}
+</div>
+</div>
+
+<button
+onClick={() =>
+openDocument(
+doc
+)
+}
+style={{
+...secondaryButton,
+color:
+"#16c784",
+}}
+>
+Apri PDF
+</button>
+</div>
+);
+}
+)
+)}
+</div>
+);
+}
+
+/* =========================================================
+DEADLINE LIST
+========================================================= */
+
+function DeadlineList({
+title,
+items,
+danger,
+alert,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius:
+16,
+padding:
+22,
+marginTop:
+20,
+}}
+>
+<h3
+style={{
+marginTop:
+0,
+}}
+>
+{title}
+</h3>
+
+{items.length ===
+0 ? (
+<div
+style={{
+color:
+"#81919a",
+}}
+>
+Nessun documento presente.
+</div>
+) : (
+items.map(
+({
+doc,
+employee,
+}: any) => (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"14px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+}}
+>
+<div>
+<strong>
+{employee?.full_name ||
+"Dipendente"}
+</strong>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize:
+12,
+marginTop:
+4,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</div>
+</div>
+
+<span
+style={{
+color:
+danger
+? "#ff7777"
+: alert
+? "#ffc857"
+: "#16c784",
+fontWeight:
+900,
+}}
+>
+{formatDate(
+doc.expiry_date
+)}
+</span>
+</div>
+)
+)
+)}
+</div>
+);
+}
