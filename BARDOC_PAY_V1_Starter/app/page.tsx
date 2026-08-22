@@ -678,7 +678,165 @@ function AdminDashboard(props: any) {
       </>}
 
       {activeSection === "deadlines" && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}><Stat title="Documenti in scadenza" value={expiringDocuments.length} alert /><Stat title="Documenti scaduti" value={expiredDocuments.length} danger /></div><DeadlineList title="Documenti scaduti" items={expiredDocuments} danger employees={allEmployees} /><DeadlineList title="Documenti in scadenza entro 30 giorni" items={expiringDocuments} alert employees={allEmployees} /></>}
+    
 
+      <div style={{ ...cardStyle, marginBottom: 20 }}><h2 style={{ marginTop: 0 }}>💬 Comunicazioni</h2>{communications.length === 0 ? <p style={{ color: "#81919a" }}>Non ci sono comunicazioni.</p> : <>{[...general, ...personal].map(c => <CommunicationCard key={c.id} communication={c} general={c.is_general} />)}</>}</div>
+
+      <div style={{ ...cardStyle, marginBottom: 20 }}>
+        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
+        <p style={{ color: "#81919a", fontSize: 13, lineHeight: 1.6 }}>
+          Hai bisogno di assistenza o vuoi inviare una richiesta?
+          Premi il pulsante qui sotto: il messaggio verrà inviato direttamente
+          al Centro Messaggi dell'Amministrazione.
+        </p>
+
+        <button
+          onClick={() => setContactOpen(true)}
+          style={{ ...buttonStyle, width: "100%", marginTop: 10 }}
+        >
+          CONTATTA L'AMMINISTRAZIONE
+        </button>
+      </div>
+
+
+    </section>
+  
+      {contactOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:999, padding:20 }}>
+          <div style={{ width:"100%", maxWidth:520, background:"#172630", border:"1px solid #2f4652", borderRadius:18, padding:24 }}>
+            <h2 style={{ marginTop:0 }}>Contatta l'Amministrazione</h2>
+            <p style={{ color:"#8ea0aa", fontSize:13, marginBottom:18 }}>
+              Invia una richiesta direttamente al Centro Messaggi dell'amministrazione.
+            </p>
+            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Oggetto" style={inputStyle}/>
+            <textarea value={contactMessage} onChange={e=>setContactMessage(e.target.value)} placeholder="Scrivi il messaggio..." rows={6} style={{...inputStyle,marginTop:12,resize:"vertical"}}/>
+            <div style={{ display:"flex", gap:12, marginTop:20 }}>
+              <button onClick={()=>setContactOpen(false)} style={{...secondaryButton,flex:1}}>Annulla</button>
+              <button onClick={sendAdminRequest} style={{...buttonStyle,flex:1}}>Invia</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+  </main>;
+}
+
+function AdminHome({ allEmployees, documents, payslips, communications, setActiveSection }: any) {
+  return <>
+    <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 20 }}><div style={{ color: "#16c784", fontSize: 12, fontWeight: 900 }}>AMMINISTRAZIONE</div><h2 style={{ margin: "8px 0" }}>Benvenuto in BARDOC PAY</h2><p style={{ color: "#a9b8c0", margin: 0 }}>Gestisci dipendenti, pagamenti, documenti, comunicazioni e presenze.</p></div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 14, marginBottom: 20 }}><Stat title="Dipendenti attivi" value={allEmployees.length} /><Stat title="Documenti" value={documents.length} /><Stat title="Buste paga" value={payslips.length} /><Stat title="Comunicazioni" value={communications.length} /></div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 16 }}>
+      <QuickCard title="Dipendenti" description="Gestisci foto, data di inizio collaborazione e presenze mensili." button="Apri dipendenti" onClick={() => setActiveSection("employees")} />
+      <QuickCard title="Gestione pagamenti" description="Carica buste paga, distinte, extra e premi lavorativi." button="Apri pagamenti" onClick={() => setActiveSection("payments")} />
+      <QuickCard title="Documenti" description="Carica documenti anagrafici e rapporto contrattuale." button="Apri documenti" onClick={() => setActiveSection("documents")} />
+      <QuickCard title="Comunicazioni" description="Invia messaggi individuali o generali e cancella quelli già inviati." button="Apri comunicazioni" onClick={() => setActiveSection("communications")} />
+    </div>
+  </>;
+}
+
+function SidebarButton({ active, onClick, children }: any) { return <button onClick={onClick} style={{ width: "100%", textAlign: "left", padding: "13px 12px", border: 0, borderRadius: 9, marginBottom: 5, background: active ? "#12332d" : "transparent", color: active ? "#16c784" : "#a9b7be", fontWeight: active ? 800 : 600, cursor: "pointer" }}>{children}</button>; }
+function ModeButton({ active, onClick, children }: any) { return <button onClick={onClick} style={{ padding: 15, borderRadius: 10, border: active ? "2px solid #16c784" : "1px solid #344955", background: active ? "#12342d" : "#101e28", color: "#fff", fontWeight: 800, cursor: "pointer" }}>{children}</button>; }
+function Stat({ title, value, alert, danger }: any) { return <div style={cardStyle}><div style={{ color: "#81919a", fontSize: 12, marginBottom: 10 }}>{title}</div><div style={{ fontSize: 29, fontWeight: 900, color: danger ? "#ff7777" : alert ? "#ffc857" : "#f2f6f7" }}>{value}</div></div>; }
+function QuickCard({ title, description, button, onClick }: any) { return <div style={cardStyle}><h3 style={{ margin: "0 0 8px" }}>{title}</h3><p style={{ color: "#82919a", fontSize: 13, lineHeight: 1.5, minHeight: 40 }}>{description}</p><button onClick={onClick} style={{ ...buttonStyle, marginTop: 8 }}>{button}</button></div>; }
+
+function DocumentList({ title, documents, employees, openDocument }: any) {
+  return <div style={{ ...cardStyle, marginTop: 20 }}><h3 style={{ marginTop: 0 }}>{title}</h3>{documents.length === 0 ? <div style={{ color: "#81919a" }}>Nessun documento presente.</div> : documents.map((doc: DocumentRow) => {
+    const employee = employees.find((e: Employee) => e.id === doc.employee_id);
+    return <div key={doc.id} style={{ borderTop: "1px solid #293b45", padding: "15px 0", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 15 }}>
+      <div><strong>{employee?.full_name || "Dipendente"}</strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 4 }}>{documentLabel(doc.document_type)}</div><div style={{ color: "#81919a", fontSize: 12, marginTop: 4 }}>{doc.file_name} · {doc.month ? `${monthLabel(doc.month)} ${doc.year}` : doc.year}</div></div>
+      <button onClick={() => openDocument(doc)} style={{ ...secondaryButton, color: "#16c784" }}>Apri PDF</button>
+    </div>;
+  })}</div>;
+}
+
+function CommunicationAdminCard({ comm, employees, onDelete }: any) {
+  const target = comm.is_general ? "Tutti i dipendenti" : employees.find((e: Employee) => e.id === comm.employee_id)?.full_name || "Dipendente";
+  return <div style={{ borderTop: "1px solid #263841", padding: "16px 0" }}><div style={{ display: "flex", justifyContent: "space-between", gap: 15, alignItems: "flex-start" }}><div><strong>{comm.title}</strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 5 }}>{comm.is_general ? "📢 " : "👤 "}{target}</div></div><span style={{ color: "#71828c", fontSize: 11 }}>{formatCommunicationDate(comm.created_at)}</span></div><div style={{ color: "#b7c4ca", marginTop: 10, whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{comm.message}</div><button onClick={() => onDelete(comm.id)} style={{ ...secondaryButton, marginTop: 12, color: "#ff7777", borderColor: "#5b3333" }}>🗑 Cancella comunicazione</button></div>;
+}
+
+function DeadlineList({ title, items, danger, alert, employees }: any) { return <div style={{ ...cardStyle, marginBottom: 20 }}><h3 style={{ marginTop: 0 }}>{title}</h3>{items.length === 0 ? <div style={{ color: "#81919a" }}>Nessun documento presente.</div> : items.map((doc: DocumentRow) => <div key={doc.id} style={{ borderTop: "1px solid #293b45", padding: "14px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}><div><strong>{employees.find((e: Employee) => e.id === doc.employee_id)?.full_name || "Dipendente"}</strong><div style={{ color: "#81919a", fontSize: 12, marginTop: 4 }}>{documentLabel(doc.document_type)}</div></div><span style={{ color: danger ? "#ff7777" : alert ? "#ffc857" : "#16c784", fontWeight: 900 }}>{formatDate(doc.expiry_date)}</span></div>)}</div>; }
+
+function AttendanceAdminTable({ employeeId, allAttendance }: any) {
+  const rows = allAttendance.filter((a: Attendance) => a.employee_id === employeeId).slice(0, 12);
+  return <div style={{ marginTop: 22 }}><h3>Ultimi mesi registrati</h3>{rows.length === 0 ? <div style={{ color: "#81919a" }}>Nessun mese registrato.</div> : rows.map((a: Attendance) => <div key={a.id} style={{ borderTop: "1px solid #293b45", padding: "10px 0", display: "flex", justifyContent: "space-between" }}><span>{monthLabel(a.month)} {a.year}</span><span><span style={{ color: "#16c784", fontWeight: 800 }}>{a.present_days} presenti</span> · <span style={{ color: "#ff5b66", fontWeight: 800 }}>{a.absent_days} assenti</span></span></div>)}</div>;
+}
+
+function AttendanceDonut({ present, absent }: { present: number; absent: number }) {
+  const total = present + absent;
+  if (total <= 0) return <div style={{ width: 120, height: 120, borderRadius: "50%", border: "12px solid #344955", display: "flex", alignItems: "center", justifyContent: "center", color: "#81919a", fontSize: 11, textAlign: "center" }}>Nessun dato</div>;
+  const pct = (present / total) * 100;
+  return <div style={{ width: 120, height: 120, borderRadius: "50%", background: `conic-gradient(#16c784 0 ${pct}%, #ff4d5a ${pct}% 100%)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><div style={{ width: 70, height: 70, borderRadius: "50%", background: "#172630", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: 14 }}>{Math.round(pct)}%</div></div>;
+}
+
+function EmployeeArea({ employee, profile, photoUrl, documents, communications, attendance, openDocument, logout, session }: any) {
+  const [openYears, setOpenYears] = useState<Record<number, boolean>>({});
+  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+
+  const payments = documents.filter((d: DocumentRow) => ["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
+  const personalDocs = documents.filter((d: DocumentRow) => !["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
+
+  const startYear = profile?.employment_start_date ? Number(profile.employment_start_date.slice(0, 4)) : CURRENT_YEAR;
+  const documentYears = payments.map((d: DocumentRow) => d.year);
+  const attendanceYears = attendance.map((a: Attendance) => a.year);
+  const rangeYears = Array.from({ length: Math.max(1, CURRENT_YEAR - startYear + 1) }, (_, i) => CURRENT_YEAR - i);
+  const years = Array.from(new Set([...rangeYears, ...documentYears, ...attendanceYears])).sort((a, b) => b - a);
+
+  function yearData(y: number) {
+    const months = new Set<number>();
+    payments.filter((d: DocumentRow) => d.year === y && d.month).forEach((d: DocumentRow) => months.add(d.month as number));
+    attendance.filter((a: Attendance) => a.year === y).forEach((a: Attendance) => months.add(a.month));
+    return Array.from(months).sort((a, b) => b - a);
+  }
+
+  const general = communications.filter((c: Communication) => c.is_general);
+  const personal = communications.filter((c: Communication) => !c.is_general);
+
+  return <main style={{ minHeight: "100vh", background: "#0d1922", color: "#e9f0f2", fontFamily: "Arial,sans-serif" }}>
+    <header style={{ background: "#08141d", borderBottom: "1px solid #20313b", padding: "18px 28px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div><strong style={{ fontSize: 21 }}>BARDOC <span style={{ color: "#16c784" }}>PAY</span></strong><div style={{ color: "#16c784", fontSize: 12, marginTop: 3 }}>AREA PERSONALE · TEAM BARDOC SERVICE</div></div>
+      <button onClick={logout} style={secondaryButton}>Esci</button>
+    </header>
+
+    <section style={{ maxWidth: 1180, margin: "0 auto", padding: 30 }}>
+      <div style={{ ...cardStyle, background: "linear-gradient(135deg,#07141f,#102d39)", marginBottom: 20 }}>
+        <div style={{ color: "#16c784", fontSize: 12, fontWeight: 900 }}>AREA PERSONALE</div>
+        <h1 style={{ margin: "8px 0 3px", fontSize: 30 }}>TEAM BARDOC SERVICE</h1>
+        <div style={{ color: "#a9b8c0" }}>Benvenuto nel tuo portale BARDOC PAY</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1.15fr)", gap: 18, marginBottom: 20 }}>
+        <div style={{ ...cardStyle, display: "flex", alignItems: "center", gap: 22 }}>
+          {photoUrl ? <img src={photoUrl} alt="Foto dipendente" style={{ width: 145, height: 145, borderRadius: "50%", objectFit: "cover", border: "2px solid #16c784", flexShrink: 0 }} /> : <div style={{ width: 145, height: 145, borderRadius: "50%", background: "#12342d", color: "#16c784", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 54, fontWeight: 900, flexShrink: 0 }}>{employee?.full_name?.charAt(0)?.toUpperCase() || "B"}</div>}
+          <div><h2 style={{ margin: "0 0 12px", fontSize: 25 }}>{employee?.full_name || "Dipendente"}</h2><div style={{ color: "#c4d0d5", lineHeight: 1.6 }}>Collabora presso la struttura<br /><strong style={{ color: "#16c784" }}>BARDOC SERVICE</strong>{profile?.employment_start_date && <><br />dal <strong>{formatDate(profile.employment_start_date)}</strong></>}</div></div>
+        </div>
+        <div style={cardStyle}><h2 style={{ margin: "0 0 14px", color: "#16c784", fontSize: 18 }}>📊 Presenze mensili</h2><p style={{ marginTop: 0, color: "#81919a", fontSize: 12 }}>Ogni mese mostra separatamente giorni di presenza e assenza.</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{attendance.slice(0, 4).map((a: Attendance) => <MonthlyAttendanceMini key={a.id} a={a} />)}</div>{attendance.length === 0 && <div style={{ color: "#81919a" }}>Nessun dato di presenza ancora inserito.</div>}</div>
+      </div>
+      <div style={cardStyle}>
+        <h2 style={{ marginTop: 0 }}>💰 Retribuzione</h2>
+        <p style={{ color: "#81919a", fontSize: 13 }}>Apri un anno per visualizzare i mesi. Gli extra e i premi compaiono soltanto quando sono stati effettivamente caricati.</p>
+        {years.map(y => {
+          const months = yearData(y);
+          const isOpen = !!openYears[y];
+          return <div key={y} style={{ borderTop: "1px solid #293b45" }}>
+            <button onClick={() => setOpenYears(v => ({ ...v, [y]: !v[y] }))} style={{ width: "100%", padding: "17px 4px", border: 0, background: "transparent", color: "#16c784", display: "flex", justifyContent: "space-between", fontSize: 17, fontWeight: 900, cursor: "pointer" }}>{y}<span>{isOpen ? "⌃" : "⌄"}</span></button>
+            {isOpen && <div style={{ paddingBottom: 10 }}>{months.length === 0 ? <div style={{ color: "#81919a", padding: "0 4px 14px" }}>Nessun dato mensile presente.</div> : months.map(m => {
+              const key = `${y}-${m}`; const open = !!openMonths[key]; const monthDocs = payments.filter((d: DocumentRow) => d.year === y && d.month === m); const att = attendance.find((a: Attendance) => a.year === y && a.month === m);
+              return <div key={key} style={{ background: "#101e28", border: "1px solid #293c47", borderRadius: 13, margin: "8px 0", overflow: "hidden" }}>
+                <button onClick={() => setOpenMonths(v => ({ ...v, [key]: !v[key] }))} style={{ width: "100%", padding: 15, border: 0, background: "transparent", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}><strong>{monthLabel(m)}</strong><span>{open ? "−" : "+"}</span></button>
+                {open && <div style={{ borderTop: "1px solid #293c47", padding: 16 }}>
+                  {att && <div style={{ display: "flex", alignItems: "center", gap: 18, paddingBottom: 16, marginBottom: 10, borderBottom: "1px solid #293c47" }}><AttendanceDonut present={att.present_days} absent={att.absent_days} /><div><div style={{ color: "#16c784", fontWeight: 900 }}>🟢 {att.present_days} giorni di presenza</div><div style={{ color: "#ff5b66", fontWeight: 900, marginTop: 8 }}>🔴 {att.absent_days} giorni di assenza</div></div></div>}
+                  {(["payslip", "payment_statement", "extra", "work_bonus"] as string[]).map(type => monthDocs.filter((d: DocumentRow) => d.document_type === type).map((doc: DocumentRow) => <PaymentRow key={doc.id} doc={doc} openDocument={openDocument} />))}
+                  {monthDocs.length === 0 && <div style={{ color: "#81919a" }}>Nessun documento di pagamento per questo mese.</div>}
+                </div>}
+              </div>;
+            })}</div>}
+          </div>;
+        })}
+      </div>
+
+      <div style={{ ...cardStyle, marginTop: 20 }}><h2 style={{ marginTop: 0 }}>📁 I miei documenti</h2>{personalDocs.length === 0 ? <p style={{ color: "#81919a" }}>Non sono presenti documenti.</p> : personalDocs.map((doc: DocumentRow) => <PersonalDocumentRow key={doc.id} doc={doc} openDocument={openDocument} />)}</div>
+
+      <div style={{ marginTop: 20, padding: 16, background: "#13222c", borderRadius: 12, color: "#81919a", fontSize: 12 }}>Accesso effettuato come <strong style={{ color: "#dce6e9" }}>{session.user.email}</strong></div>
     </section>
   </main>;
 }
