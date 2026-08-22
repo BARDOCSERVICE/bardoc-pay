@@ -235,6 +235,16 @@ fontWeight: 700,
 cursor: "pointer",
 };
 
+const deleteButton: React.CSSProperties = {
+padding: "10px 14px",
+border: "1px solid #713838",
+borderRadius: 9,
+background: "#3a1d21",
+color: "#ff8b8b",
+fontWeight: 800,
+cursor: "pointer",
+};
+
 /* =========================================================
 HOME
 ========================================================= */
@@ -260,6 +270,9 @@ useState("");
 
 const [submitting, setSubmitting] =
 useState(false);
+
+const [deletingCommunicationId, setDeletingCommunicationId] =
+useState<string | null>(null);
 
 const [employee, setEmployee] =
 useState<Employee | null>(null);
@@ -910,6 +923,94 @@ setSubmitting(false);
 }
 
 /* =====================================================
+CANCELLA COMUNICAZIONE
+===================================================== */
+
+async function deleteCommunication(
+communicationId: string
+) {
+if (!isAdmin) {
+setMessage(
+"Non hai i permessi per cancellare le comunicazioni."
+);
+return;
+}
+
+const communication =
+adminCommunications.find(
+(item) =>
+item.id ===
+communicationId
+);
+
+if (!communication) {
+setMessage(
+"Comunicazione non trovata."
+);
+return;
+}
+
+const confirmed =
+window.confirm(
+`Vuoi cancellare definitivamente la comunicazione "${communication.title}"?`
+);
+
+if (!confirmed) {
+return;
+}
+
+setMessage("");
+setDeletingCommunicationId(
+communicationId
+);
+
+try {
+const {
+error,
+} =
+await supabase
+.from(
+"communications"
+)
+.delete()
+.eq(
+"id",
+communicationId
+);
+
+if (error) {
+throw error;
+}
+
+setAdminCommunications(
+(current) =>
+current.filter(
+(item) =>
+item.id !==
+communicationId
+)
+);
+
+setMessage(
+"Comunicazione cancellata correttamente. ✅"
+);
+
+await loadAdminData();
+} catch (error: any) {
+console.error(error);
+
+setMessage(
+error?.message ||
+"Errore durante la cancellazione della comunicazione."
+);
+} finally {
+setDeletingCommunicationId(
+null
+);
+}
+}
+
+/* =====================================================
 FILTRO DIPENDENTI
 ===================================================== */
 
@@ -1500,6 +1601,12 @@ setCommunicationMessage
 sendCommunication={
 sendCommunication
 }
+deleteCommunication={
+deleteCommunication
+}
+deletingCommunicationId={
+deletingCommunicationId
+}
 />
 );
 }
@@ -1580,6 +1687,8 @@ setCommunicationTitle,
 communicationMessage,
 setCommunicationMessage,
 sendCommunication,
+deleteCommunication,
+deletingCommunicationId,
 }: any) {
 const isPayroll =
 category ===
@@ -3128,6 +3237,10 @@ message
 )}
 </div>
 
+{/* =================================================
+STORICO COMUNICAZIONI
+================================================= */}
+
 <div
 style={{
 background:
@@ -3140,14 +3253,51 @@ padding:
 22,
 }}
 >
+<div
+style={{
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap:
+15,
+marginBottom:
+5,
+}}
+>
 <h3
 style={{
 marginTop:
+0,
+marginBottom:
 0,
 }}
 >
 Storico comunicazioni
 </h3>
+
+<span
+style={{
+color:
+"#71828c",
+fontSize:
+12,
+}}
+>
+{communications.length}{" "}
+comunicazioni
+</span>
+</div>
+
+{message && (
+<Message
+text={
+message
+}
+/>
+)}
 
 {communications.length ===
 0 ? (
@@ -3155,6 +3305,8 @@ Storico comunicazioni
 style={{
 color:
 "#82919a",
+marginTop:
+20,
 }}
 >
 Nessuna comunicazione presente.
@@ -3177,6 +3329,10 @@ comm.employee_id
 ?.full_name ||
 "Dipendente";
 
+const isDeleting =
+deletingCommunicationId ===
+comm.id;
+
 return (
 <div
 key={
@@ -3195,11 +3351,20 @@ display:
 "flex",
 justifyContent:
 "space-between",
+alignItems:
+"flex-start",
 gap:
 15,
 }}
 >
-<div>
+<div
+style={{
+flex:
+1,
+minWidth:
+0,
+}}
+>
 <strong>
 {
 comm.title
@@ -3223,20 +3388,47 @@ marginTop:
 target
 }
 </div>
-</div>
 
-<span
+<div
 style={{
 color:
 "#71828c",
 fontSize:
 11,
+marginTop:
+5,
 }}
 >
 {formatCommunicationDate(
 comm.created_at
 )}
-</span>
+</div>
+</div>
+
+<button
+type="button"
+onClick={() =>
+deleteCommunication(
+comm.id
+)
+}
+disabled={
+isDeleting
+}
+style={{
+...deleteButton,
+opacity:
+isDeleting
+? 0.5
+: 1,
+flexShrink:
+0,
+}}
+>
+{isDeleting
+? "CANCELLAZIONE..."
+: "🗑️ Cancella"}
+</button>
 </div>
 
 <div
