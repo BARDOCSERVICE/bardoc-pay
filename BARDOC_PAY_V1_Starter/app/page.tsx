@@ -678,47 +678,7 @@ function AdminDashboard(props: any) {
       </>}
 
       {activeSection === "deadlines" && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}><Stat title="Documenti in scadenza" value={expiringDocuments.length} alert /><Stat title="Documenti scaduti" value={expiredDocuments.length} danger /></div><DeadlineList title="Documenti scaduti" items={expiredDocuments} danger employees={allEmployees} /><DeadlineList title="Documenti in scadenza entro 30 giorni" items={expiringDocuments} alert employees={allEmployees} /></>}
-    
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}><h2 style={{ marginTop: 0 }}>💬 Comunicazioni</h2>{communications.length === 0 ? <p style={{ color: "#81919a" }}>Non ci sono comunicazioni.</p> : <>{[...general, ...personal].map(c => <CommunicationCard key={c.id} communication={c} general={c.is_general} />)}</>}</div>
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
-        <p style={{ color: "#81919a", fontSize: 13, lineHeight: 1.6 }}>
-          Hai bisogno di assistenza o vuoi inviare una richiesta?
-          Premi il pulsante qui sotto: il messaggio verrà inviato direttamente
-          al Centro Messaggi dell'Amministrazione.
-        </p>
-
-        <button
-          onClick={() => setContactOpen(true)}
-          style={{ ...buttonStyle, width: "100%", marginTop: 10 }}
-        >
-          CONTATTA L'AMMINISTRAZIONE
-        </button>
-      </div>
-
-
-    </section>
-  
-      {contactOpen && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:999, padding:20 }}>
-          <div style={{ width:"100%", maxWidth:520, background:"#172630", border:"1px solid #2f4652", borderRadius:18, padding:24 }}>
-            <h2 style={{ marginTop:0 }}>Contatta l'Amministrazione</h2>
-            <p style={{ color:"#8ea0aa", fontSize:13, marginBottom:18 }}>
-              Invia una richiesta direttamente al Centro Messaggi dell'amministrazione.
-            </p>
-            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Oggetto" style={inputStyle}/>
-            <textarea value={contactMessage} onChange={e=>setContactMessage(e.target.value)} placeholder="Scrivi il messaggio..." rows={6} style={{...inputStyle,marginTop:12,resize:"vertical"}}/>
-            <div style={{ display:"flex", gap:12, marginTop:20 }}>
-              <button onClick={()=>setContactOpen(false)} style={{...secondaryButton,flex:1}}>Annulla</button>
-              <button onClick={sendAdminRequest} style={{...buttonStyle,flex:1}}>Invia</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-  </main>;
+</main>;
 }
 
 function AdminHome({ allEmployees, documents, payslips, communications, setActiveSection }: any) {
@@ -771,6 +731,22 @@ function AttendanceDonut({ present, absent }: { present: number; absent: number 
 function EmployeeArea({ employee, profile, photoUrl, documents, communications, attendance, openDocument, logout, session }: any) {
   const [openYears, setOpenYears] = useState<Record<number, boolean>>({});
   const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+  const [contactOpen, setContactOpen] = useState(false);
+  const [subject, setSubject] = useState("");
+  const [contactMessage, setContactMessage] = useState("");
+
+  async function sendAdminRequest() {
+    if (!employee || !subject.trim() || !contactMessage.trim()) return;
+    await supabase.from("admin_messages").insert({
+      employee_id: employee.id,
+      subject,
+      message: contactMessage
+    });
+    setContactOpen(false);
+    setSubject("");
+    setContactMessage("");
+    alert("Richiesta inviata.");
+  }
 
   const payments = documents.filter((d: DocumentRow) => ["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
   const personalDocs = documents.filter((d: DocumentRow) => !["payslip", "payment_statement", "extra", "work_bonus"].includes(d.document_type));
@@ -837,6 +813,32 @@ function EmployeeArea({ employee, profile, photoUrl, documents, communications, 
       <div style={{ ...cardStyle, marginTop: 20 }}><h2 style={{ marginTop: 0 }}>📁 I miei documenti</h2>{personalDocs.length === 0 ? <p style={{ color: "#81919a" }}>Non sono presenti documenti.</p> : personalDocs.map((doc: DocumentRow) => <PersonalDocumentRow key={doc.id} doc={doc} openDocument={openDocument} />)}</div>
 
       <div style={{ marginTop: 20, padding: 16, background: "#13222c", borderRadius: 12, color: "#81919a", fontSize: 12 }}>Accesso effettuato come <strong style={{ color: "#dce6e9" }}>{session.user.email}</strong></div>
+      <div style={{ ...cardStyle, marginTop: 20 }}>
+        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
+        <p style={{ color:"#81919a", fontSize:13, lineHeight:1.6 }}>
+          Hai bisogno di assistenza? Invia una richiesta direttamente
+          al Centro Messaggi dell'Amministrazione.
+        </p>
+        <button onClick={() => setContactOpen(true)} style={{ ...buttonStyle, width:"100%" }}>
+          CONTATTA L'AMMINISTRAZIONE
+        </button>
+      </div>
+
+      {contactOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:999 }}>
+          <div style={{ width:"100%", maxWidth:520, background:"#172630", borderRadius:18, padding:24 }}>
+            <h2 style={{ marginTop:0 }}>Contatta l'Amministrazione</h2>
+            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Oggetto" style={inputStyle}/>
+            <textarea value={contactMessage} onChange={e=>setContactMessage(e.target.value)} rows={6} placeholder="Scrivi il messaggio..." style={{ ...inputStyle, marginTop:12, resize:"vertical" }}/>
+            <div style={{ display:"flex", gap:12, marginTop:18 }}>
+              <button onClick={()=>setContactOpen(false)} style={{ ...secondaryButton, flex:1 }}>Annulla</button>
+              <button onClick={sendAdminRequest} style={{ ...buttonStyle, flex:1 }}>Invia</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+
     </section>
   </main>;
 }
