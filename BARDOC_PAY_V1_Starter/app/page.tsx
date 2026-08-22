@@ -9,8 +9,6 @@ auth_user_id: string | null;
 full_name: string;
 email: string | null;
 active: boolean;
-fiscal_code: string | null;
-photo_path: string | null;
 };
 
 type Document = {
@@ -24,15 +22,6 @@ storage_path: string;
 tax_code: string | null;
 expiry_date: string | null;
 };
-
-type AdminSection =
-| "dashboard"
-| "employees"
-| "documents"
-| "payroll"
-| "payments"
-| "expiries"
-| "upload";
 
 const ADMIN_EMAIL = "bardocfg@gmail.com";
 
@@ -108,9 +97,9 @@ label: "Curriculum / CV storico",
 
 const CATEGORY_LABELS: Record<string, string> = {
 retribuzione: "Retribuzione",
-lavoro: "Rapporto di lavoro",
+lavoro: "Rapporto contrattuale",
 permessi: "Permessi e assenze",
-personali: "Documenti personali",
+personali: "Documenti anagrafici",
 curriculum: "Curriculum",
 };
 
@@ -123,30 +112,12 @@ type
 );
 }
 
-function categoryFromType(type: string) {
-for (const [category, values] of Object.entries(
-DOCUMENT_TYPES
-)) {
-if (
-values.some(
-(item) => item.value === type
-)
-) {
-return category;
-}
-}
-
-return "retribuzione";
-}
-
 function formatDate(date: string | null) {
 if (!date) return "—";
 
 const parts = date.split("-");
 
-if (parts.length !== 3) {
-return date;
-}
+if (parts.length !== 3) return date;
 
 return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
@@ -156,14 +127,10 @@ const today = new Date();
 
 today.setHours(0, 0, 0, 0);
 
-const expiry = new Date(
-`${date}T00:00:00`
-);
+const expiry = new Date(`${date}T00:00:00`);
 
 return Math.ceil(
-(expiry.getTime() -
-today.getTime()) /
-86400000
+(expiry.getTime() - today.getTime()) / 86400000
 );
 }
 
@@ -174,25 +141,11 @@ if (!date) return "none";
 
 const days = daysUntil(date);
 
-if (days < 0) {
-return "expired";
-}
+if (days < 0) return "expired";
 
-if (days <= 30) {
-return "warning";
-}
+if (days <= 30) return "warning";
 
 return "valid";
-}
-
-function initials(name: string) {
-return name
-.split(" ")
-.filter(Boolean)
-.map((part) => part[0])
-.slice(0, 2)
-.join("")
-.toUpperCase();
 }
 
 export default function Home() {
@@ -233,38 +186,32 @@ const [adminLoading, setAdminLoading] =
 useState(false);
 
 const [adminSection, setAdminSection] =
-useState<AdminSection>(
-"dashboard"
-);
+useState<
+| "dashboard"
+| "employees"
+| "payslips"
+| "payments"
+| "documents"
+| "deadlines"
+>("dashboard");
 
 const [search, setSearch] =
+useState("");
+
+const [documentSearch, setDocumentSearch] =
 useState("");
 
 const [selectedEmployee, setSelectedEmployee] =
 useState("");
 
-const [selectedEmployeeProfile, setSelectedEmployeeProfile] =
-useState<Employee | null>(null);
-
-const [employeePhoto, setEmployeePhoto] =
-useState<File | null>(null);
-
-const [employeePhotoUrl, setEmployeePhotoUrl] =
-useState("");
-
-const [photoUploading, setPhotoUploading] =
-useState(false);
-
 const [category, setCategory] =
-useState("retribuzione");
+useState("personali");
 
 const [documentType, setDocumentType] =
-useState("payslip");
+useState("id_card");
 
 const [month, setMonth] =
-useState(
-new Date().getMonth() + 1
-);
+useState(new Date().getMonth() + 1);
 
 const [year, setYear] =
 useState(CURRENT_YEAR);
@@ -283,13 +230,11 @@ session?.user?.email?.toLowerCase() ===
 ADMIN_EMAIL.toLowerCase();
 
 const selectedTypeRequiresTaxCode =
-documentType ===
-"driver_license";
+documentType === "driver_license";
 
 const selectedTypeAllowsExpiry =
 documentType === "id_card" ||
-documentType ===
-"driver_license";
+documentType === "driver_license";
 
 useEffect(() => {
 supabase.auth
@@ -372,23 +317,15 @@ setEmployee(null);
 setDocuments([]);
 setEmployees([]);
 setAllDocuments([]);
-setSelectedEmployeeProfile(null);
-setEmployeePhotoUrl("");
-setEmployeePhoto(null);
 setEmail("");
 setPassword("");
-setAdminSection("dashboard");
 }
 
 async function loadEmployeeArea() {
-if (!session?.user?.id) {
-return;
-}
+if (!session?.user?.id) return;
 
-const {
-data: emp,
-error: empError,
-} = await supabase
+const { data: emp, error: empError } =
+await supabase
 .from("employees")
 .select("*")
 .eq(
@@ -404,9 +341,7 @@ return;
 
 setEmployee(emp);
 
-if (!emp) {
-return;
-}
+if (!emp) return;
 
 const {
 data: docs,
@@ -465,203 +400,30 @@ ascending: false,
 ascending: false,
 });
 
-if (docsError) {
-console.error(docsError);
-}
-
+if (!docsError) {
 setAllDocuments(docs || []);
+}
 
 setAdminLoading(false);
 }
 
-async function openEmployeeProfile(
-emp: Employee
-) {
-setSelectedEmployeeProfile(emp);
-setEmployeePhotoUrl("");
-setEmployeePhoto(null);
-setMessage("");
-
-if (!emp.photo_path) {
-return;
-}
-
-const {
-data,
-error,
-} = await supabase.storage
-.from("employee-photos")
-.createSignedUrl(
-emp.photo_path,
-600
-);
-
-if (error) {
-console.error(error);
-return;
-}
-
-if (data?.signedUrl) {
-setEmployeePhotoUrl(
-data.signedUrl
-);
-}
-}
-
-async function uploadEmployeePhoto() {
-if (!selectedEmployeeProfile) {
-setMessage(
-"Seleziona un dipendente."
-);
-return;
-}
-
-if (!employeePhoto) {
-setMessage(
-"Seleziona una foto."
-);
-return;
-}
-
-if (
-![
-"image/jpeg",
-"image/png",
-"image/webp",
-].includes(employeePhoto.type)
-) {
-setMessage(
-"La foto deve essere JPG, PNG oppure WEBP."
-);
-return;
-}
-
-if (
-employeePhoto.size >
-5 * 1024 * 1024
-) {
-setMessage(
-"La foto non può superare 5 MB."
-);
-return;
-}
-
-setPhotoUploading(true);
-setMessage("");
-
-try {
-const extension =
-employeePhoto.type ===
-"image/png"
-? "png"
-: employeePhoto.type ===
-"image/webp"
-? "webp"
-: "jpg";
-
-const storagePath = `${selectedEmployeeProfile.id}/${crypto.randomUUID()}.${extension}`;
-
-const {
-error: uploadError,
-} = await supabase.storage
-.from("employee-photos")
-.upload(
-storagePath,
-employeePhoto,
-{
-upsert: false,
-contentType:
-employeePhoto.type,
-}
-);
-
-if (uploadError) {
-throw uploadError;
-}
-
-const {
-error: updateError,
-} = await supabase
-.from("employees")
-.update({
-photo_path:
-storagePath,
-})
-.eq(
-"id",
-selectedEmployeeProfile.id
-);
-
-if (updateError) {
-throw updateError;
-}
-
-const updatedEmployee = {
-...selectedEmployeeProfile,
-photo_path:
-storagePath,
-};
-
-setSelectedEmployeeProfile(
-updatedEmployee
-);
-
-setEmployees(
-(current) =>
-current.map((emp) =>
-emp.id ===
-updatedEmployee.id
-? updatedEmployee
-: emp
-)
-);
-
-const {
-data: signedData,
-} = await supabase.storage
-.from("employee-photos")
-.createSignedUrl(
-storagePath,
-600
-);
-
-if (
-signedData?.signedUrl
-) {
-setEmployeePhotoUrl(
-signedData.signedUrl
-);
-}
-
-setEmployeePhoto(null);
-
-setMessage(
-"Foto del dipendente caricata correttamente. ✅"
-);
-} catch (error: any) {
-console.error(error);
-
-setMessage(
-error?.message ||
-"Errore durante il caricamento della foto."
-);
-}
-
-setPhotoUploading(false);
-}
-
 function resetDocumentForm() {
 setSelectedEmployee("");
-setCategory(
-"retribuzione"
-);
-setDocumentType("payslip");
+
+setCategory("personali");
+
+setDocumentType("id_card");
+
 setMonth(
 new Date().getMonth() + 1
 );
+
 setYear(CURRENT_YEAR);
+
 setTaxCode("");
+
 setExpiryDate("");
+
 setFile(null);
 
 const input =
@@ -702,7 +464,9 @@ return;
 }
 
 const normalizedTaxCode =
-taxCode.trim().toUpperCase();
+taxCode
+.trim()
+.toUpperCase();
 
 if (
 normalizedTaxCode &&
@@ -750,11 +514,13 @@ file.name
 "_"
 );
 
-const storagePath = `${selectedEmployee}/${Date.now()}_${safeFileName}`;
+const storagePath =
+`${selectedEmployee}/${Date.now()}_${safeFileName}`;
 
 const {
 error: uploadError,
-} = await supabase.storage
+} =
+await supabase.storage
 .from(
 "payroll-documents"
 )
@@ -780,7 +546,8 @@ documentType ===
 
 const {
 error: documentError,
-} = await supabase
+} =
+await supabase
 .from("documents")
 .insert({
 employee_id:
@@ -806,7 +573,8 @@ normalizedTaxCode ||
 null,
 
 expiry_date:
-expiryDate || null,
+expiryDate ||
+null,
 });
 
 if (documentError) {
@@ -838,7 +606,8 @@ doc: Document
 const {
 data,
 error,
-} = await supabase.storage
+} =
+await supabase.storage
 .from(
 "payroll-documents"
 )
@@ -899,14 +668,7 @@ emp.full_name
 .toLowerCase()
 .includes(q) ||
 (
-emp.email ||
-""
-)
-.toLowerCase()
-.includes(q) ||
-(
-emp.fiscal_code ||
-""
+emp.email || ""
 )
 .toLowerCase()
 .includes(q) ||
@@ -966,29 +728,101 @@ allDocuments,
 employees,
 ]);
 
-const payrollDocuments =
-useMemo(
-() =>
-allDocuments.filter(
+const payslips =
+useMemo(() => {
+return allDocuments.filter(
 (doc) =>
 doc.document_type ===
-"payslip" ||
+"payslip"
+);
+}, [allDocuments]);
+
+const paymentStatements =
+useMemo(() => {
+return allDocuments.filter(
+(doc) =>
 doc.document_type ===
 "payment_statement"
-),
-[allDocuments]
+);
+}, [allDocuments]);
+
+const filteredPayslips =
+useMemo(() => {
+const q =
+documentSearch
+.trim()
+.toLowerCase();
+
+if (!q) {
+return payslips;
+}
+
+return payslips.filter(
+(doc) => {
+const emp =
+employees.find(
+(item) =>
+item.id ===
+doc.employee_id
 );
 
-const paymentDocuments =
-useMemo(
-() =>
-allDocuments.filter(
-(doc) =>
-doc.document_type ===
-"payment_statement"
-),
-[allDocuments]
+return (
+emp?.full_name
+.toLowerCase()
+.includes(q) ||
+emp?.email
+?.toLowerCase()
+.includes(q) ||
+doc.file_name
+.toLowerCase()
+.includes(q)
 );
+}
+);
+}, [
+payslips,
+employees,
+documentSearch,
+]);
+
+const filteredPaymentStatements =
+useMemo(() => {
+const q =
+documentSearch
+.trim()
+.toLowerCase();
+
+if (!q) {
+return paymentStatements;
+}
+
+return paymentStatements.filter(
+(doc) => {
+const emp =
+employees.find(
+(item) =>
+item.id ===
+doc.employee_id
+);
+
+return (
+emp?.full_name
+.toLowerCase()
+.includes(q) ||
+emp?.email
+?.toLowerCase()
+.includes(q) ||
+doc.file_name
+.toLowerCase()
+.includes(q)
+);
+}
+);
+}, [
+paymentStatements,
+employees,
+documentSearch,
+]);
 
 if (loading) {
 return (
@@ -1022,7 +856,8 @@ background:
 "#16c784",
 color:
 "#062019",
-display: "flex",
+display:
+"flex",
 alignItems:
 "center",
 justifyContent:
@@ -1098,7 +933,8 @@ background:
 "#16c784",
 color:
 "#062019",
-display: "flex",
+display:
+"flex",
 alignItems:
 "center",
 justifyContent:
@@ -1175,7 +1011,9 @@ darkInput
 <input
 type="password"
 placeholder="Password"
-value={password}
+value={
+password
+}
 onChange={(e) =>
 setPassword(
 e.target.value
@@ -1197,7 +1035,7 @@ greenButton
 }
 >
 {submitting
-? "ATTENDERE..."
+? "Attendere..."
 : loginMode
 ? "ACCEDI"
 : "CREA ACCOUNT"}
@@ -1213,10 +1051,10 @@ setLoginMode(
 setMessage("");
 }}
 style={{
-width:
-"100%",
+width: "100%",
 marginTop: 20,
-border: "none",
+border:
+"none",
 background:
 "transparent",
 color:
@@ -1257,11 +1095,21 @@ fontSize: 13,
 if (isAdmin) {
 return (
 <AdminDashboard
-section={
+adminSection={
 adminSection
 }
-setSection={
-setAdminSection
+setAdminSection={
+(
+value: any
+) => {
+setAdminSection(
+value
+);
+setMessage("");
+setDocumentSearch(
+""
+);
+}
 }
 employees={
 filteredEmployees
@@ -1274,36 +1122,25 @@ allDocuments
 }
 search={search}
 setSearch={setSearch}
+documentSearch={
+documentSearch
+}
+setDocumentSearch={
+setDocumentSearch
+}
 selectedEmployee={
 selectedEmployee
 }
 setSelectedEmployee={
 setSelectedEmployee
 }
-selectedEmployeeProfile={
-selectedEmployeeProfile
-}
-setSelectedEmployeeProfile={
-setSelectedEmployeeProfile
-}
-employeePhotoUrl={
-employeePhotoUrl
-}
-employeePhoto={
-employeePhoto
-}
-setEmployeePhoto={
-setEmployeePhoto
-}
-photoUploading={
-photoUploading
-}
-uploadEmployeePhoto={
-uploadEmployeePhoto
-}
 category={category}
-setCategory={(value) => {
-setCategory(value);
+setCategory={(
+value: string
+) => {
+setCategory(
+value
+);
 
 const first =
 DOCUMENT_TYPES[
@@ -1312,7 +1149,7 @@ value
 
 setDocumentType(
 first?.value ||
-"payslip"
+"id_card"
 );
 
 setTaxCode("");
@@ -1321,21 +1158,24 @@ setExpiryDate("");
 documentType={
 documentType
 }
-setDocumentType={
-(value) => {
+setDocumentType={(
+value: string
+) => {
 setDocumentType(
 value
 );
+
 setTaxCode("");
 setExpiryDate("");
-}
-}
+}}
 month={month}
 setMonth={setMonth}
 year={year}
 setYear={setYear}
 taxCode={taxCode}
-setTaxCode={setTaxCode}
+setTaxCode={
+setTaxCode
+}
 expiryDate={
 expiryDate
 }
@@ -1354,9 +1194,6 @@ uploadDocument
 openDocument={
 openDocument
 }
-openEmployeeProfile={
-openEmployeeProfile
-}
 logout={logout}
 adminLoading={
 adminLoading
@@ -1367,11 +1204,11 @@ expiringDocuments
 expiredDocuments={
 expiredDocuments
 }
-payrollDocuments={
-payrollDocuments
+payslips={
+filteredPayslips
 }
-paymentDocuments={
-paymentDocuments
+paymentStatements={
+filteredPaymentStatements
 }
 />
 );
@@ -1420,23 +1257,33 @@ fontWeight: 900,
 cursor: "pointer",
 };
 
+const darkSelect: React.CSSProperties =
+{
+width: "100%",
+padding: 13,
+borderRadius: 9,
+border:
+"1px solid #344955",
+background:
+"#101e28",
+color: "#fff",
+boxSizing:
+"border-box",
+fontSize: 14,
+};
+
 function AdminDashboard({
-section,
-setSection,
+adminSection,
+setAdminSection,
 employees,
 allEmployees,
 documents,
 search,
 setSearch,
+documentSearch,
+setDocumentSearch,
 selectedEmployee,
 setSelectedEmployee,
-selectedEmployeeProfile,
-setSelectedEmployeeProfile,
-employeePhotoUrl,
-employeePhoto,
-setEmployeePhoto,
-photoUploading,
-uploadEmployeePhoto,
 category,
 setCategory,
 documentType,
@@ -1455,13 +1302,12 @@ submitting,
 message,
 uploadDocument,
 openDocument,
-openEmployeeProfile,
 logout,
 adminLoading,
 expiringDocuments,
 expiredDocuments,
-payrollDocuments,
-paymentDocuments,
+payslips,
+paymentStatements,
 }: any) {
 const isPersonal =
 category ===
@@ -1480,6 +1326,15 @@ documentType ===
 const isPayroll =
 category ===
 "retribuzione";
+
+const navigate =
+(
+section: string
+) => {
+setAdminSection(
+section
+);
+};
 
 return (
 <main
@@ -1508,16 +1363,24 @@ boxSizing:
 "border-box",
 minHeight:
 "100vh",
-position:
-"sticky",
-top: 0,
+flexShrink: 0,
 }}
 >
 <div
 style={{
-fontSize: 20,
-fontWeight: 900,
-marginBottom: 4,
+padding:
+"8px 8px 22px",
+borderBottom:
+"1px solid #20313b",
+marginBottom:
+18,
+}}
+>
+<div
+style={{
+fontSize: 21,
+fontWeight:
+900,
 }}
 >
 BARDOC{" "}
@@ -1536,127 +1399,151 @@ style={{
 color:
 "#16c784",
 fontSize: 11,
-fontWeight: 800,
-marginBottom:
-30,
+fontWeight:
+800,
+marginTop: 5,
 }}
 >
 AMMINISTRAZIONE
 </div>
+</div>
 
 <SidebarButton
+label="⌂ Dashboard"
 active={
-section ===
+adminSection ===
 "dashboard"
 }
-onClick={() => {
-setSection(
+onClick={() =>
+navigate(
 "dashboard"
-);
-setSelectedEmployeeProfile(
-null
-);
-}}
->
-⌂ Dashboard
-</SidebarButton>
+)
+}
+/>
 
 <SidebarButton
+label="♙ Dipendenti"
 active={
-section ===
+adminSection ===
 "employees"
 }
-onClick={() => {
-setSection(
+onClick={() =>
+navigate(
 "employees"
-);
-setSelectedEmployeeProfile(
-null
-);
-}}
->
-♙ Dipendenti
-</SidebarButton>
-
-<SidebarButton
-active={
-section ===
-"documents"
-}
-onClick={() =>
-setSection(
-"documents"
 )
 }
->
-▣ Documenti
-</SidebarButton>
-
-<SidebarButton
-active={
-section ===
-"payroll"
-}
-onClick={() =>
-setSection(
-"payroll"
-)
-}
->
-€ Buste paga
-</SidebarButton>
-
-<SidebarButton
-active={
-section ===
-"payments"
-}
-onClick={() =>
-setSection(
-"payments"
-)
-}
->
-▤ Distinte pagamento
-</SidebarButton>
-
-<SidebarButton
-active={
-section ===
-"expiries"
-}
-onClick={() =>
-setSection(
-"expiries"
-)
-}
->
-◷ Scadenze
-</SidebarButton>
-
-<SidebarButton
-active={
-section ===
-"upload"
-}
-onClick={() =>
-setSection(
-"upload"
-)
-}
->
-↑ Carica documento
-</SidebarButton>
+/>
 
 <div
 style={{
-position:
-"fixed",
-bottom: 22,
-width: 200,
+height: 12,
+}}
+/>
+
+<div
+style={{
 color:
-"#73838c",
-fontSize: 12,
+"#5f737e",
+fontSize: 10,
+fontWeight:
+900,
+padding:
+"0 12px 7px",
+letterSpacing:
+0.8,
+}}
+>
+RETRIBUZIONE
+</div>
+
+<SidebarButton
+label="€ Buste paga"
+active={
+adminSection ===
+"payslips"
+}
+onClick={() =>
+navigate(
+"payslips"
+)
+}
+/>
+
+<SidebarButton
+label="▤ Distinte di pagamento"
+active={
+adminSection ===
+"payments"
+}
+onClick={() =>
+navigate(
+"payments"
+)
+}
+/>
+
+<div
+style={{
+height: 12,
+}}
+/>
+
+<div
+style={{
+color:
+"#5f737e",
+fontSize: 10,
+fontWeight:
+900,
+padding:
+"0 12px 7px",
+letterSpacing:
+0.8,
+}}
+>
+DOCUMENTI
+</div>
+
+<SidebarButton
+label="📁 Documenti"
+active={
+adminSection ===
+"documents"
+}
+onClick={() =>
+navigate(
+"documents"
+)
+}
+/>
+
+<SidebarButton
+label="⚠ Scadenze"
+active={
+adminSection ===
+"deadlines"
+}
+onClick={() =>
+navigate(
+"deadlines"
+)
+}
+/>
+
+<div
+style={{
+marginTop:
+30,
+padding:
+14,
+borderRadius: 12,
+background:
+"#0d1e28",
+border:
+"1px solid #20313b",
+color:
+"#81919a",
+fontSize: 11,
 }}
 >
 <span
@@ -1669,76 +1556,17 @@ color:
 </span>{" "}
 Sistema operativo
 </div>
-</aside>
-
-<section
-style={{
-flex: 1,
-padding: 28,
-maxWidth: 1500,
-boxSizing:
-"border-box",
-overflow:
-"auto",
-}}
->
-<header
-style={{
-display:
-"flex",
-justifyContent:
-"space-between",
-alignItems:
-"center",
-marginBottom:
-24,
-}}
->
-<div>
-<h1
-style={{
-margin: 0,
-fontSize: 26,
-}}
->
-{section ===
-"dashboard"
-? "Dashboard"
-: section ===
-"employees"
-? "Gestione personale"
-: section ===
-"documents"
-? "Documenti"
-: section ===
-"payroll"
-? "Buste paga"
-: section ===
-"payments"
-? "Distinte di pagamento"
-: section ===
-"expiries"
-? "Scadenze"
-: "Carica documento"}
-</h1>
-
-<div
-style={{
-color:
-"#82919a",
-marginTop: 5,
-fontSize: 13,
-}}
->
-Gestione del personale BARDOC SERVICE
-</div>
-</div>
 
 <button
-onClick={logout}
+onClick={
+logout
+}
 style={{
-padding:
-"10px 17px",
+width:
+"100%",
+marginTop:
+15,
+padding: 12,
 border:
 "1px solid #30424d",
 borderRadius: 9,
@@ -1746,18 +1574,29 @@ background:
 "#13222c",
 color:
 "#dce6e9",
-fontWeight: 700,
+fontWeight:
+700,
 cursor:
 "pointer",
 }}
 >
 Esci
 </button>
-</header>
+</aside>
 
-{section ===
+<section
+style={{
+flex: 1,
+padding: 28,
+boxSizing:
+"border-box",
+overflowX:
+"auto",
+}}
+>
+{adminSection ===
 "dashboard" && (
-<DashboardHome
+<DashboardView
 allEmployees={
 allEmployees
 }
@@ -1770,54 +1609,24 @@ expiringDocuments
 expiredDocuments={
 expiredDocuments
 }
-setSection={
-setSection
-}
-setSearch={
-setSearch
+onNavigate={
+navigate
 }
 />
 )}
 
-{section ===
+{adminSection ===
 "employees" && (
-<EmployeesSection
+<EmployeesView
 employees={
 employees
-}
-allEmployees={
-allEmployees
-}
-documents={
-documents
 }
 search={search}
 setSearch={
 setSearch
 }
-selectedEmployeeProfile={
-selectedEmployeeProfile
-}
-setSelectedEmployeeProfile={
-setSelectedEmployeeProfile
-}
-employeePhotoUrl={
-employeePhotoUrl
-}
-employeePhoto={
-employeePhoto
-}
-setEmployeePhoto={
-setEmployeePhoto
-}
-photoUploading={
-photoUploading
-}
-uploadEmployeePhoto={
-uploadEmployeePhoto
-}
-openEmployeeProfile={
-openEmployeeProfile
+documents={
+documents
 }
 adminLoading={
 adminLoading
@@ -1825,85 +1634,66 @@ adminLoading
 />
 )}
 
-{section ===
-"documents" && (
-<DocumentsSection
-documents={
-documents
-}
-employees={
-allEmployees
-}
-openDocument={
-openDocument
-}
-/>
-)}
-
-{section ===
-"payroll" && (
-<DocumentsSection
+{adminSection ===
+"payslips" && (
+<DocumentArchive
 title="Buste paga"
+subtitle="Archivio delle buste paga dei dipendenti."
 documents={
-payrollDocuments.filter(
-(doc: Document) =>
-doc.document_type ===
-"payslip"
-)
+payslips
 }
 employees={
 allEmployees
 }
+search={
+documentSearch
+}
+setSearch={
+setDocumentSearch
+}
 openDocument={
 openDocument
 }
+emptyText="Non sono presenti buste paga."
 />
 )}
 
-{section ===
+{adminSection ===
 "payments" && (
-<DocumentsSection
+<DocumentArchive
 title="Distinte di pagamento"
+subtitle="Archivio delle distinte di pagamento dei dipendenti."
 documents={
-paymentDocuments
+paymentStatements
 }
 employees={
 allEmployees
 }
-openDocument={
-openDocument
+search={
+documentSearch
 }
-/>
-)}
-
-{section ===
-"expiries" && (
-<ExpirySection
-expiringDocuments={
-expiringDocuments
-}
-expiredDocuments={
-expiredDocuments
+setSearch={
+setDocumentSearch
 }
 openDocument={
 openDocument
 }
+emptyText="Non sono presenti distinte di pagamento."
 />
 )}
 
-{section ===
-"upload" && (
-<UploadSection
-allEmployees={
-allEmployees
-}
+{adminSection ===
+"documents" && (
+<DocumentsView
 selectedEmployee={
 selectedEmployee
 }
 setSelectedEmployee={
 setSelectedEmployee
 }
-category={category}
+category={
+category
+}
 setCategory={
 setCategory
 }
@@ -1917,7 +1707,9 @@ month={month}
 setMonth={setMonth}
 year={year}
 setYear={setYear}
-taxCode={taxCode}
+taxCode={
+taxCode
+}
 setTaxCode={
 setTaxCode
 }
@@ -1940,6 +1732,45 @@ message
 uploadDocument={
 uploadDocument
 }
+allEmployees={
+allEmployees
+}
+isPersonal={
+isPersonal
+}
+requiresTaxCode={
+requiresTaxCode
+}
+allowsExpiry={
+allowsExpiry
+}
+isPayroll={
+isPayroll
+}
+documents={
+documents
+}
+employees={
+allEmployees
+}
+openDocument={
+openDocument
+}
+/>
+)}
+
+{adminSection ===
+"deadlines" && (
+<DeadlinesView
+expiringDocuments={
+expiringDocuments
+}
+expiredDocuments={
+expiredDocuments
+}
+openDocument={
+openDocument
+}
 />
 )}
 </section>
@@ -1948,9 +1779,9 @@ uploadDocument
 }
 
 function SidebarButton({
+label,
 active,
 onClick,
-children,
 }: any) {
 return (
 <button
@@ -1958,10 +1789,13 @@ onClick={onClick}
 style={{
 width: "100%",
 padding:
-"13px 12px",
-border: "none",
+"12px 13px",
+border:
+"none",
 borderRadius: 9,
 marginBottom: 5,
+textAlign:
+"left",
 background:
 active
 ? "#12332d"
@@ -1976,76 +1810,34 @@ active
 : 600,
 cursor:
 "pointer",
-textAlign:
-"left",
-fontSize: 14,
+fontSize: 13,
 }}
 >
-{children}
+{label}
 </button>
 );
 }
 
-function DashboardHome({
+function DashboardView({
 allEmployees,
 documents,
 expiringDocuments,
 expiredDocuments,
-setSection,
-setSearch,
+onNavigate,
 }: any) {
 return (
 <>
-<div
-style={{
-background:
-"linear-gradient(135deg,#07141f,#102d39)",
-borderRadius: 20,
-padding: 30,
-marginBottom:
-20,
-border:
-"1px solid #263b47",
-}}
->
-<div
-style={{
-color:
-"#16c784",
-fontSize: 12,
-fontWeight: 900,
-}}
->
-AMMINISTRAZIONE
-</div>
-
-<h2
-style={{
-margin:
-"8px 0",
-fontSize: 30,
-}}
->
-Dashboard
-</h2>
-
-<p
-style={{
-margin: 0,
-color:
-"#a9b8c0",
-}}
->
-Gestione del personale e documentazione BARDOC PAY.
-</p>
-</div>
+<PageHeader
+title="Dashboard"
+subtitle="Gestione del personale BARDOC SERVICE"
+/>
 
 <div
 style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(4,minmax(180px,1fr))",
+"repeat(4,minmax(160px,1fr))",
 gap: 14,
 marginBottom:
 20,
@@ -2087,57 +1879,56 @@ style={{
 display:
 "grid",
 gridTemplateColumns:
-"repeat(auto-fit,minmax(220px,1fr))",
+"repeat(auto-fit,minmax(240px,1fr))",
 gap: 15,
 marginBottom:
 20,
 }}
 >
 <QuickCard
-icon="♙"
+icon="👥"
 title="Dipendenti"
-description="Cerca e gestisci le schede del personale."
+text="Cerca e consulta le schede del personale."
 button="GESTISCI DIPENDENTI"
-onClick={() => {
-setSearch("");
-setSection(
-"employees"
-);
-}}
-/>
-
-<QuickCard
-icon="↑"
-title="Carica documento"
-description="Pubblica una nuova busta paga o documento."
-button="CARICA DOCUMENTO"
 onClick={() =>
-setSection(
-"upload"
+onNavigate(
+"employees"
 )
 }
 />
 
 <QuickCard
-icon="€"
+icon="💰"
 title="Buste paga"
-description="Visualizza tutte le buste paga archiviate."
+text="Consulta l'archivio delle buste paga."
 button="VEDI BUSTE PAGA"
 onClick={() =>
-setSection(
-"payroll"
+onNavigate(
+"payslips"
 )
 }
 />
 
 <QuickCard
-icon="◷"
-title="Scadenze"
-description="Controlla documenti in scadenza o scaduti."
-button="CONTROLLA SCADENZE"
+icon="🧾"
+title="Distinte di pagamento"
+text="Consulta le distinte di pagamento."
+button="VEDI DISTINTE"
 onClick={() =>
-setSection(
-"expiries"
+onNavigate(
+"payments"
+)
+}
+/>
+
+<QuickCard
+icon="📁"
+title="Documenti"
+text="Carica e gestisci i documenti del personale."
+button="GESTISCI DOCUMENTI"
+onClick={() =>
+onNavigate(
+"documents"
 )
 }
 />
@@ -2153,16 +1944,17 @@ background:
 "#17242c",
 border:
 "1px solid #30434d",
-borderRadius: 16,
-padding: 20,
+borderRadius: 14,
+padding: 18,
 }}
 >
 <h3
 style={{
-marginTop: 0,
+marginTop:
+0,
 }}
 >
-🚨 Attenzione scadenze
+🚨 Attenzione: scadenze documenti
 </h3>
 
 {[
@@ -2176,7 +1968,9 @@ doc,
 employee,
 }: any) => (
 <div
-key={doc.id}
+key={
+doc.id
+}
 style={{
 display:
 "flex",
@@ -2187,8 +1981,7 @@ alignItems:
 borderTop:
 "1px solid #263841",
 padding:
-"12px 0",
-gap: 15,
+"11px 0",
 }}
 >
 <div>
@@ -2240,7 +2033,7 @@ doc.expiry_date
 function QuickCard({
 icon,
 title,
-description,
+text,
 button,
 onClick,
 }: any) {
@@ -2257,23 +2050,7 @@ padding: 20,
 >
 <div
 style={{
-width: 42,
-height: 42,
-borderRadius: 12,
-background:
-"#12332d",
-color:
-"#16c784",
-display:
-"flex",
-alignItems:
-"center",
-justifyContent:
-"center",
-fontSize: 20,
-fontWeight: 900,
-marginBottom:
-14,
+fontSize: 26,
 }}
 >
 {icon}
@@ -2282,7 +2059,7 @@ marginBottom:
 <h3
 style={{
 margin:
-"0 0 7px",
+"12px 0 6px",
 }}
 >
 {title}
@@ -2291,28 +2068,30 @@ margin:
 <p
 style={{
 color:
-"#82919a",
-fontSize: 13,
-lineHeight: 1.5,
-minHeight: 40,
+"#81919a",
+fontSize: 12,
+minHeight:
+34,
 }}
 >
-{description}
+{text}
 </p>
 
 <button
 onClick={onClick}
 style={{
+marginTop: 8,
+padding:
+"10px 12px",
 border:
 "none",
-borderRadius: 9,
+borderRadius: 8,
 background:
 "#16c784",
 color:
 "#062019",
-padding:
-"10px 13px",
-fontWeight: 900,
+fontWeight:
+900,
 cursor:
 "pointer",
 fontSize: 11,
@@ -2324,409 +2103,30 @@ fontSize: 11,
 );
 }
 
-function EmployeesSection({
+function EmployeesView({
 employees,
-allEmployees,
-documents,
 search,
 setSearch,
-selectedEmployeeProfile,
-setSelectedEmployeeProfile,
-employeePhotoUrl,
-employeePhoto,
-setEmployeePhoto,
-photoUploading,
-uploadEmployeePhoto,
-openEmployeeProfile,
+documents,
 adminLoading,
 }: any) {
-if (
-selectedEmployeeProfile
-) {
-const employeeDocuments =
-documents.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeProfile.id
-);
-
 return (
+<>
+<PageHeader
+title="Dipendenti"
+subtitle="Ricerca e gestione del personale."
+/>
+
 <div
 style={{
 background:
 "#172630",
 border:
 "1px solid #293c47",
-borderRadius: 18,
-padding: 24,
-}}
->
-<button
-onClick={() => {
-setSelectedEmployeeProfile(
-null
-);
-}}
-style={{
-border: "none",
-background:
-"transparent",
-color:
-"#16c784",
-fontWeight:
-800,
-cursor:
-"pointer",
-marginBottom:
-20,
-}}
->
-← Torna ai dipendenti
-</button>
-
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"260px minmax(0,1fr)",
-gap: 25,
-}}
->
-<div
-style={{
-background:
-"#0b151d",
-border:
-"1px solid #293c47",
-borderRadius:
-18,
+borderRadius: 16,
 padding: 22,
-textAlign:
-"center",
 }}
 >
-{employeePhotoUrl ? (
-<img
-src={
-employeePhotoUrl
-}
-alt={
-selectedEmployeeProfile.full_name
-}
-style={{
-width: 180,
-height: 180,
-borderRadius:
-"50%",
-objectFit:
-"cover",
-display:
-"block",
-margin:
-"0 auto 18px",
-border:
-"4px solid #16c784",
-}}
-/>
-) : (
-<div
-style={{
-width: 180,
-height: 180,
-borderRadius:
-"50%",
-background:
-"#16c784",
-color:
-"#062019",
-display:
-"flex",
-alignItems:
-"center",
-justifyContent:
-"center",
-margin:
-"0 auto 18px",
-fontSize: 52,
-fontWeight:
-900,
-}}
->
-{initials(
-selectedEmployeeProfile.full_name
-)}
-</div>
-)}
-
-<strong
-style={{
-fontSize: 19,
-}}
->
-{
-selectedEmployeeProfile.full_name
-}
-</strong>
-
-<div
-style={{
-color:
-"#16c784",
-fontSize: 12,
-fontWeight:
-800,
-marginTop: 8,
-}}
->
-● ATTIVO
-</div>
-
-<label
-style={{
-display:
-"block",
-marginTop:
-22,
-padding:
-12,
-borderRadius:
-10,
-background:
-"#16c784",
-color:
-"#062019",
-fontWeight:
-800,
-cursor:
-"pointer",
-}}
->
-📷 Carica / cambia foto
-
-<input
-type="file"
-accept="image/jpeg,image/png,image/webp"
-onChange={(e) =>
-setEmployeePhoto(
-e.target
-.files?.[0] ||
-null
-)
-}
-style={{
-display:
-"none",
-}}
-/>
-</label>
-
-{employeePhoto && (
-<button
-onClick={
-uploadEmployeePhoto
-}
-disabled={
-photoUploading
-}
-style={{
-width:
-"100%",
-marginTop:
-10,
-padding: 11,
-border:
-"1px solid #16c784",
-borderRadius:
-10,
-background:
-"transparent",
-color:
-"#16c784",
-fontWeight:
-800,
-cursor:
-"pointer",
-}}
->
-{photoUploading
-? "CARICAMENTO..."
-: "SALVA FOTO"}
-</button>
-)}
-</div>
-
-<div>
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(210px,1fr))",
-gap: 14,
-}}
->
-<InfoBox
-label="Nome completo"
-value={
-selectedEmployeeProfile.full_name
-}
-/>
-
-<InfoBox
-label="Email"
-value={
-selectedEmployeeProfile.email ||
-"—"
-}
-/>
-
-<InfoBox
-label="Codice fiscale"
-value={
-selectedEmployeeProfile.fiscal_code ||
-"—"
-}
-/>
-
-<InfoBox
-label="Stato"
-value="● Attivo"
-green
-/>
-</div>
-
-<h3
-style={{
-marginTop:
-28,
-}}
->
-📁 Fascicolo digitale
-</h3>
-
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"repeat(auto-fit,minmax(190px,1fr))",
-gap: 12,
-}}
->
-<FolderCard
-icon="🪪"
-title="Documenti personali"
-count={employeeDocuments.filter(
-(d: Document) =>
-categoryFromType(
-d.document_type
-) ===
-"personali"
-).length}
-/>
-
-<FolderCard
-icon="📑"
-title="Rapporto di lavoro"
-count={employeeDocuments.filter(
-(d: Document) =>
-categoryFromType(
-d.document_type
-) ===
-"lavoro"
-).length}
-/>
-
-<FolderCard
-icon="💰"
-title="Retribuzione"
-count={employeeDocuments.filter(
-(d: Document) =>
-categoryFromType(
-d.document_type
-) ===
-"retribuzione"
-).length}
-/>
-
-<FolderCard
-icon="📝"
-title="Permessi e assenze"
-count={employeeDocuments.filter(
-(d: Document) =>
-categoryFromType(
-d.document_type
-) ===
-"permessi"
-).length}
-/>
-
-<FolderCard
-icon="📄"
-title="Curriculum"
-count={employeeDocuments.filter(
-(d: Document) =>
-categoryFromType(
-d.document_type
-) ===
-"curriculum"
-).length}
-/>
-
-<FolderCard
-icon="🚨"
-title="Scadenze"
-count={employeeDocuments.filter(
-(d: Document) =>
-!!d.expiry_date
-).length}
-/>
-</div>
-</div>
-</div>
-</div>
-);
-}
-
-return (
-<div
-style={{
-background:
-"#172630",
-border:
-"1px solid #293c47",
-borderRadius: 18,
-padding: 24,
-}}
->
-<div
-style={{
-marginBottom:
-20,
-}}
->
-<h2
-style={{
-margin:
-"0 0 6px",
-}}
->
-Cerca dipendente
-</h2>
-
-<p
-style={{
-margin: 0,
-color:
-"#82919a",
-fontSize: 13,
-}}
->
-Cerca per nome, email oppure Codice Fiscale.
-</p>
-</div>
-
 <input
 value={search}
 onChange={(e) =>
@@ -2735,21 +2135,22 @@ e.target.value
 )
 }
 placeholder="Cerca nome, email o codice fiscale..."
-style={{
-...darkInput,
-marginBottom:
-20,
-}}
+style={
+darkInput
+}
 />
 
+<div
+style={{
+marginTop:
+18,
+}}
+>
 {adminLoading ? (
 <div
 style={{
-padding: 30,
-textAlign:
-"center",
 color:
-"#82919a",
+"#81919a",
 }}
 >
 Caricamento dipendenti...
@@ -2758,95 +2159,46 @@ Caricamento dipendenti...
 0 ? (
 <div
 style={{
-padding: 30,
-textAlign:
-"center",
 color:
-"#82919a",
+"#81919a",
 }}
 >
 Nessun dipendente trovato.
 </div>
 ) : (
 employees.map(
-(emp: Employee) => (
-<button
-key={emp.id}
-onClick={() =>
-openEmployeeProfile(
-emp
-)
-}
-style={{
-display:
-"flex",
-alignItems:
-"center",
-gap: 15,
-width:
-"100%",
-padding: 15,
-marginBottom:
-10,
-border:
-"1px solid #2d414c",
-borderRadius:
-13,
-background:
-"#101d26",
-color:
-"#fff",
-cursor:
-"pointer",
-textAlign:
-"left",
-}}
->
-{emp.photo_path ? (
-<EmployeeMiniPhoto
-employee={
-emp
-}
-/>
-) : (
-<div
-style={{
-width: 55,
-height: 55,
-borderRadius:
-"50%",
-background:
-"#16c784",
-color:
-"#062019",
-display:
-"flex",
-alignItems:
-"center",
-justifyContent:
-"center",
-fontWeight:
-900,
-fontSize: 18,
-flexShrink: 0,
-}}
->
-{initials(
-emp.full_name
-)}
-</div>
-)}
+(
+emp: Employee
+) => {
+const count =
+documents.filter(
+(
+doc: Document
+) =>
+doc.employee_id ===
+emp.id
+).length;
 
+return (
 <div
+key={
+emp.id
+}
 style={{
-flex: 1,
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+padding:
+"16px 0",
+borderTop:
+"1px solid #263841",
 }}
 >
-<strong
-style={{
-fontSize: 16,
-}}
->
+<div>
+<strong>
 {
 emp.full_name
 }
@@ -2855,7 +2207,7 @@ emp.full_name
 <div
 style={{
 color:
-"#82919a",
+"#81919a",
 fontSize: 12,
 marginTop: 4,
 }}
@@ -2863,281 +2215,112 @@ marginTop: 4,
 {emp.email ||
 "Nessuna email"}
 </div>
-
-{emp.fiscal_code && (
-<div
-style={{
-color:
-"#71838d",
-fontSize: 11,
-marginTop: 3,
-}}
->
-CF:{" "}
-{
-emp.fiscal_code
-}
-</div>
-)}
 </div>
 
 <span
 style={{
 color:
 "#16c784",
-fontSize: 11,
-fontWeight:
-900,
-}}
->
-● ATTIVO
-</span>
-</button>
-)
-)
-)}
-</div>
-);
-}
-
-function EmployeeMiniPhoto({
-employee,
-}: {
-employee: Employee;
-}) {
-const [url, setUrl] =
-useState("");
-
-useEffect(() => {
-let mounted = true;
-
-if (!employee.photo_path) {
-return;
-}
-
-supabase.storage
-.from("employee-photos")
-.createSignedUrl(
-employee.photo_path,
-600
-)
-.then(({ data }) => {
-if (
-mounted &&
-data?.signedUrl
-) {
-setUrl(
-data.signedUrl
-);
-}
-});
-
-return () => {
-mounted = false;
-};
-}, [
-employee.photo_path,
-]);
-
-if (!url) {
-return (
-<div
-style={{
-width: 55,
-height: 55,
-borderRadius:
-"50%",
-background:
-"#16c784",
-color:
-"#062019",
-display:
-"flex",
-alignItems:
-"center",
-justifyContent:
-"center",
-fontWeight:
-900,
-fontSize: 18,
-flexShrink: 0,
-}}
->
-{initials(
-employee.full_name
-)}
-</div>
-);
-}
-
-return (
-<img
-src={url}
-alt={
-employee.full_name
-}
-style={{
-width: 55,
-height: 55,
-borderRadius:
-"50%",
-objectFit:
-"cover",
-border:
-"2px solid #16c784",
-flexShrink: 0,
-}}
-/>
-);
-}
-
-function InfoBox({
-label,
-value,
-green,
-}: any) {
-return (
-<div
-style={{
-padding: 17,
-background:
-"#101d26",
-border:
-"1px solid #293c47",
-borderRadius: 13,
-}}
->
-<small
-style={{
-color:
-"#71838d",
-}}
->
-{label}
-</small>
-
-<div
-style={{
-fontWeight:
-800,
-marginTop: 6,
-color: green
-? "#16c784"
-: "#fff",
-}}
->
-{value}
-</div>
-</div>
-);
-}
-
-function FolderCard({
-icon,
-title,
-count,
-}: any) {
-return (
-<div
-style={{
-padding: 17,
-borderRadius: 13,
-background:
-"#101d26",
-border:
-"1px solid #293c47",
-}}
->
-<div
-style={{
-fontSize: 23,
-marginBottom:
-8,
-}}
->
-{icon}
-</div>
-
-<div
-style={{
-fontWeight:
-800,
-}}
->
-{title}
-</div>
-
-<div
-style={{
-color:
-"#71838d",
 fontSize: 12,
-marginTop: 5,
+fontWeight:
+800,
 }}
 >
 {count} documenti
-</div>
+</span>
 </div>
 );
 }
+)
+)}
+</div>
+</div>
+</>
+);
+}
 
-function DocumentsSection({
-title = "Documenti",
+function DocumentArchive({
+title,
+subtitle,
 documents,
 employees,
+search,
+setSearch,
 openDocument,
+emptyText,
 }: any) {
 return (
+<>
+<PageHeader
+title={title}
+subtitle={
+subtitle
+}
+/>
+
 <div
 style={{
 background:
 "#172630",
 border:
 "1px solid #293c47",
-borderRadius: 18,
-padding: 24,
+borderRadius: 16,
+padding: 22,
 }}
 >
-<h2
-style={{
-margin:
-"0 0 20px",
-}}
->
-{title}
-</h2>
+<input
+value={search}
+onChange={(e) =>
+setSearch(
+e.target.value
+)
+}
+placeholder="Cerca dipendente o documento..."
+style={
+darkInput
+}
+/>
 
+<div
+style={{
+marginTop:
+18,
+}}
+>
 {documents.length ===
 0 ? (
 <div
 style={{
-padding: 30,
+padding:
+25,
 textAlign:
 "center",
 color:
-"#82919a",
+"#81919a",
 }}
 >
-Nessun documento presente.
+{emptyText}
 </div>
 ) : (
 documents.map(
-(doc: Document) => {
-const employee =
+(
+doc: Document
+) => {
+const emp =
 employees.find(
-(emp: Employee) =>
-emp.id ===
+(
+item: Employee
+) =>
+item.id ===
 doc.employee_id
 );
 
 return (
 <div
-key={doc.id}
+key={
+doc.id
+}
 style={{
-borderTop:
-"1px solid #293c47",
-padding:
-"15px 0",
 display:
 "flex",
 justifyContent:
@@ -3145,13 +2328,16 @@ justifyContent:
 alignItems:
 "center",
 gap: 15,
+padding:
+"16px 0",
+borderTop:
+"1px solid #293b45",
 }}
 >
 <div>
 <strong>
-{documentLabel(
-doc.document_type
-)}
+{emp?.full_name ||
+"Dipendente"}
 </strong>
 
 <div
@@ -3159,17 +2345,20 @@ style={{
 color:
 "#16c784",
 fontSize: 12,
-marginTop: 4,
+marginTop: 5,
+fontWeight:
+700,
 }}
 >
-{employee?.full_name ||
-"Dipendente"}
+{documentLabel(
+doc.document_type
+)}
 </div>
 
 <div
 style={{
 color:
-"#82919a",
+"#81919a",
 fontSize: 12,
 marginTop: 4,
 }}
@@ -3179,32 +2368,6 @@ marginTop: 4,
 ? ` · ${MONTHS[doc.month - 1]} ${doc.year}`
 : ` · ${doc.year}`}
 </div>
-
-{doc.expiry_date && (
-<div
-style={{
-color:
-expiryStatus(
-doc.expiry_date
-) ===
-"expired"
-? "#ff7777"
-: expiryStatus(
-doc.expiry_date
-) ===
-"warning"
-? "#ffc857"
-: "#82919a",
-fontSize: 12,
-marginTop: 4,
-}}
->
-Scadenza:{" "}
-{formatDate(
-doc.expiry_date
-)}
-</div>
-)}
 </div>
 
 <button
@@ -3214,14 +2377,15 @@ doc
 )
 }
 style={{
-background:
-"#16c784",
+padding:
+"10px 15px",
 border:
 "none",
-borderRadius:
-9,
-padding:
-"10px 16px",
+borderRadius: 9,
+background:
+"#16c784",
+color:
+"#062019",
 fontWeight:
 900,
 cursor:
@@ -3238,185 +2402,12 @@ APRI PDF
 )
 )}
 </div>
+</div>
+</>
 );
 }
 
-function ExpirySection({
-expiringDocuments,
-expiredDocuments,
-openDocument,
-}: any) {
-return (
-<div
-style={{
-display:
-"grid",
-gap: 20,
-}}
->
-<ExpiryList
-title="🚨 Documenti scaduti"
-documents={
-expiredDocuments
-}
-openDocument={
-openDocument
-}
-danger
-/>
-
-<ExpiryList
-title="⚠️ Documenti in scadenza entro 30 giorni"
-documents={
-expiringDocuments
-}
-openDocument={
-openDocument
-}
-/>
-</div>
-);
-}
-
-function ExpiryList({
-title,
-documents,
-openDocument,
-danger,
-}: any) {
-return (
-<div
-style={{
-background:
-"#172630",
-border:
-"1px solid #293c47",
-borderRadius: 18,
-padding: 24,
-}}
->
-<h2
-style={{
-margin:
-"0 0 18px",
-color: danger
-? "#ff7777"
-: "#ffc857",
-}}
->
-{title}
-</h2>
-
-{documents.length ===
-0 ? (
-<div
-style={{
-color:
-"#82919a",
-}}
->
-Nessun documento.
-</div>
-) : (
-documents.map(
-({
-doc,
-employee,
-}: any) => (
-<div
-key={doc.id}
-style={{
-borderTop:
-"1px solid #293c47",
-padding:
-"14px 0",
-display:
-"flex",
-justifyContent:
-"space-between",
-alignItems:
-"center",
-gap: 15,
-}}
->
-<div>
-<strong>
-{employee?.full_name ||
-"Dipendente"}
-</strong>
-
-<div
-style={{
-color:
-"#82919a",
-fontSize: 12,
-marginTop: 4,
-}}
->
-{documentLabel(
-doc.document_type
-)}
-</div>
-</div>
-
-<div
-style={{
-display:
-"flex",
-alignItems:
-"center",
-gap: 12,
-}}
->
-<span
-style={{
-color:
-danger
-? "#ff7777"
-: "#ffc857",
-fontWeight:
-900,
-}}
->
-{formatDate(
-doc.expiry_date
-)}
-</span>
-
-<button
-onClick={() =>
-openDocument(
-doc
-)
-}
-style={{
-background:
-"#16c784",
-border:
-"none",
-borderRadius:
-8,
-padding:
-"8px 12px",
-fontWeight:
-800,
-cursor:
-"pointer",
-}}
->
-APRI
-</button>
-</div>
-</div>
-)
-)
-)}
-</div>
-);
-}
-
-function UploadSection({
-allEmployees,
+function DocumentsView({
 selectedEmployee,
 setSelectedEmployee,
 category,
@@ -3436,46 +2427,61 @@ setFile,
 submitting,
 message,
 uploadDocument,
+allEmployees,
+isPersonal,
+requiresTaxCode,
+allowsExpiry,
+isPayroll,
+documents,
+employees,
+openDocument,
 }: any) {
-const isPersonal =
-category ===
-"personali";
-
-const requiresTaxCode =
-documentType ===
-"driver_license";
-
-const allowsExpiry =
-documentType ===
-"id_card" ||
-documentType ===
-"driver_license";
-
-const isPayroll =
-category ===
-"retribuzione";
-
 return (
+<>
+<PageHeader
+title="Documenti"
+subtitle="Caricamento e gestione della documentazione del personale."
+/>
+
+<div
+style={{
+display:
+"grid",
+gridTemplateColumns:
+"minmax(0,1.2fr) minmax(280px,.8fr)",
+gap: 18,
+alignItems:
+"start",
+}}
+>
 <div
 style={{
 background:
 "#172630",
 border:
 "1px solid #293c47",
-borderRadius: 18,
-padding: 25,
+borderRadius: 16,
+padding: 24,
 }}
 >
 <div
 style={{
+color:
+"#16c784",
+fontSize: 11,
+fontWeight:
+900,
 marginBottom:
-20,
+5,
 }}
 >
+NUOVO DOCUMENTO
+</div>
+
 <h2
 style={{
 margin:
-"0 0 6px",
+"0 0 5px",
 }}
 >
 Carica documento
@@ -3483,28 +2489,17 @@ Carica documento
 
 <p
 style={{
-margin: 0,
+margin:
+"0 0 12px",
 color:
-"#82919a",
-fontSize: 13,
+"#81919a",
+fontSize: 12,
 }}
 >
-Pubblica documenti e documentazione del personale.
+Inserisci qui la documentazione anagrafica o relativa al rapporto contrattuale.
 </p>
-</div>
 
-<div
-style={{
-display:
-"grid",
-gridTemplateColumns:
-"repeat(2,minmax(250px,1fr))",
-gap: 17,
-}}
->
-<Field
-label="Dipendente"
->
+<Field label="Dipendente">
 <select
 value={
 selectedEmployee
@@ -3527,21 +2522,27 @@ Seleziona dipendente
 emp: Employee
 ) => (
 <option
-key={emp.id}
-value={emp.id}
+key={
+emp.id
+}
+value={
+emp.id
+}
 >
-{emp.full_name}
+{
+emp.full_name
+}
 </option>
 )
 )}
 </select>
 </Field>
 
-<Field
-label="Categoria documento"
->
+<Field label="Categoria documento">
 <select
-value={category}
+value={
+category
+}
 onChange={(e) =>
 setCategory(
 e.target.value
@@ -3551,27 +2552,25 @@ style={
 darkSelect
 }
 >
-{Object.entries(
-CATEGORY_LABELS
-).map(
-([
-value,
-label,
-]) => (
-<option
-key={value}
-value={value}
->
-{label}
+<option value="personali">
+Documenti anagrafici
 </option>
-)
-)}
+
+<option value="lavoro">
+Rapporto contrattuale
+</option>
+
+<option value="permessi">
+Permessi e assenze
+</option>
+
+<option value="curriculum">
+Curriculum
+</option>
 </select>
 </Field>
 
-<Field
-label="Tipo documento"
->
+<Field label="Tipo documento">
 <select
 value={
 documentType
@@ -3590,7 +2589,9 @@ DOCUMENT_TYPES[
 category
 ] || []
 ).map(
-(item) => (
+(
+item
+) => (
 <option
 key={
 item.value
@@ -3599,7 +2600,9 @@ value={
 item.value
 }
 >
-{item.label}
+{
+item.label
+}
 </option>
 )
 )}
@@ -3609,8 +2612,12 @@ item.value
 {isPayroll && (
 <Field label="Mese">
 <select
-value={month}
-onChange={(e) =>
+value={
+month
+}
+onChange={(
+e
+) =>
 setMonth(
 Number(
 e.target
@@ -3636,7 +2643,9 @@ index +
 1
 }
 >
-{name}
+{
+name
+}
 </option>
 )
 )}
@@ -3646,7 +2655,9 @@ index +
 
 <Field label="Anno">
 <select
-value={year}
+value={
+year
+}
 onChange={(e) =>
 setYear(
 Number(
@@ -3660,12 +2671,20 @@ darkSelect
 }
 >
 {YEARS.map(
-(y) => (
+(
+y
+) => (
 <option
-key={y}
-value={y}
+key={
+y
+}
+value={
+y
+}
 >
-{y}
+{
+y
+}
 </option>
 )
 )}
@@ -3690,7 +2709,9 @@ e.target.value
 .toUpperCase()
 )
 }
-maxLength={16}
+maxLength={
+16
+}
 placeholder="16 caratteri alfanumerici"
 style={
 darkInput
@@ -3714,9 +2735,7 @@ marginTop: 6,
 )}
 
 {allowsExpiry && (
-<Field
-label="Data di scadenza"
->
+<Field label="Data di scadenza">
 <input
 type="date"
 value={
@@ -3742,15 +2761,12 @@ display:
 marginTop: 6,
 }}
 >
-La data permetterà a BARDOC PAY di generare gli alert.
+La data verrà utilizzata per gli alert di scadenza.
 </small>
 </Field>
 )}
-</div>
 
-<Field
-label="Documento PDF"
->
+<Field label="Documento PDF">
 <input
 id="document-file"
 type="file"
@@ -3781,7 +2797,8 @@ submitting
 }
 style={{
 ...greenButton,
-marginTop: 22,
+marginTop:
+22,
 opacity:
 submitting
 ? 0.65
@@ -3796,7 +2813,8 @@ submitting
 {message && (
 <div
 style={{
-marginTop: 15,
+marginTop:
+15,
 padding: 13,
 borderRadius: 9,
 background:
@@ -3810,6 +2828,322 @@ fontSize: 13,
 </div>
 )}
 </div>
+
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 20,
+}}
+>
+<div
+style={{
+color:
+"#16c784",
+fontSize: 11,
+fontWeight:
+900,
+marginBottom:
+7,
+}}
+>
+STRUTTURA DOCUMENTI
+</div>
+
+<DocumentCategoryCard
+icon="🪪"
+title="Documenti anagrafici"
+text="Documento d'identità e patente."
+/>
+
+<DocumentCategoryCard
+icon="📑"
+title="Rapporto contrattuale"
+text="Contratto di lavoro e documentazione del rapporto."
+/>
+
+<DocumentCategoryCard
+icon="◷"
+title="Permessi e assenze"
+text="Fogli permesso e documentazione delle assenze."
+/>
+
+<DocumentCategoryCard
+icon="📄"
+title="Curriculum"
+text="Curriculum e CV storico del dipendente."
+/>
+</div>
+</div>
+</>
+);
+}
+
+function DocumentCategoryCard({
+icon,
+title,
+text,
+}: any) {
+return (
+<div
+style={{
+padding:
+"14px 0",
+borderBottom:
+"1px solid #293b45",
+}}
+>
+<div
+style={{
+display:
+"flex",
+gap: 10,
+alignItems:
+"center",
+}}
+>
+<span
+style={{
+fontSize: 19,
+}}
+>
+{icon}
+</span>
+
+<strong>
+{title}
+</strong>
+</div>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize: 11,
+marginTop: 6,
+paddingLeft:
+29,
+}}
+>
+{text}
+</div>
+</div>
+);
+}
+
+function DeadlinesView({
+expiringDocuments,
+expiredDocuments,
+openDocument,
+}: any) {
+return (
+<>
+<PageHeader
+title="Scadenze"
+subtitle="Controllo dei documenti in scadenza e già scaduti."
+/>
+
+<div
+style={{
+display:
+"grid",
+gridTemplateColumns:
+"1fr 1fr",
+gap: 18,
+}}
+>
+<DeadlinePanel
+title="🚨 In scadenza"
+color="#ffc857"
+items={
+expiringDocuments
+}
+openDocument={
+openDocument
+}
+empty="Nessun documento in scadenza nei prossimi 30 giorni."
+/>
+
+<DeadlinePanel
+title="⛔ Scaduti"
+color="#ff7777"
+items={
+expiredDocuments
+}
+openDocument={
+openDocument
+}
+empty="Non risultano documenti scaduti."
+/>
+</div>
+</>
+);
+}
+
+function DeadlinePanel({
+title,
+color,
+items,
+openDocument,
+empty,
+}: any) {
+return (
+<div
+style={{
+background:
+"#172630",
+border:
+"1px solid #293c47",
+borderRadius: 16,
+padding: 20,
+}}
+>
+<h2
+style={{
+marginTop:
+0,
+color,
+}}
+>
+{title}
+</h2>
+
+{items.length ===
+0 ? (
+<p
+style={{
+color:
+"#81919a",
+fontSize: 12,
+}}
+>
+{empty}
+</p>
+) : (
+items.map(
+({
+doc,
+employee,
+}: any) => (
+<div
+key={
+doc.id
+}
+style={{
+borderTop:
+"1px solid #293b45",
+padding:
+"14px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+gap: 12,
+alignItems:
+"center",
+}}
+>
+<div>
+<strong>
+{employee?.full_name ||
+"Dipendente"}
+</strong>
+
+<div
+style={{
+color:
+"#81919a",
+fontSize: 11,
+marginTop: 5,
+}}
+>
+{documentLabel(
+doc.document_type
+)}
+</div>
+
+<div
+style={{
+color,
+fontSize: 12,
+fontWeight:
+800,
+marginTop: 5,
+}}
+>
+Scadenza:{" "}
+{formatDate(
+doc.expiry_date
+)}
+</div>
+</div>
+
+<button
+onClick={() =>
+openDocument(
+doc
+)
+}
+style={{
+padding:
+"8px 11px",
+border:
+"1px solid #344955",
+borderRadius: 8,
+background:
+"#101e28",
+color:
+"#dce6e9",
+fontWeight:
+700,
+cursor:
+"pointer",
+}}
+>
+PDF
+</button>
+</div>
+)
+)
+)}
+</div>
+);
+}
+
+function PageHeader({
+title,
+subtitle,
+}: any) {
+return (
+<header
+style={{
+marginBottom:
+22,
+}}
+>
+<h1
+style={{
+margin: 0,
+fontSize: 26,
+}}
+>
+{title}
+</h1>
+
+<div
+style={{
+color:
+"#82919a",
+marginTop: 5,
+fontSize: 13,
+}}
+>
+{subtitle}
+</div>
+</header>
 );
 }
 
@@ -3845,7 +3179,8 @@ marginBottom:
 <div
 style={{
 fontSize: 28,
-fontWeight: 900,
+fontWeight:
+900,
 color: danger
 ? "#ff7777"
 : alert
@@ -3866,7 +3201,8 @@ children,
 return (
 <div
 style={{
-marginTop: 17,
+marginTop:
+17,
 }}
 >
 <label
@@ -3876,7 +3212,8 @@ display:
 color:
 "#aebbc2",
 fontSize: 12,
-fontWeight: 700,
+fontWeight:
+700,
 marginBottom:
 7,
 }}
@@ -3888,22 +3225,6 @@ marginBottom:
 </div>
 );
 }
-
-const darkSelect: React.CSSProperties =
-{
-width:
-"100%",
-padding: 13,
-borderRadius: 9,
-border:
-"1px solid #344955",
-background:
-"#101e28",
-color: "#fff",
-boxSizing:
-"border-box",
-fontSize: 14,
-};
 
 function EmployeeArea({
 employee,
@@ -3947,15 +3268,7 @@ style={{
 fontSize: 21,
 }}
 >
-BARDOC{" "}
-<span
-style={{
-color:
-"#16c784",
-}}
->
-PAY
-</span>
+BARDOC PAY
 </strong>
 
 <div
@@ -3971,7 +3284,9 @@ AREA PERSONALE
 </div>
 
 <button
-onClick={logout}
+onClick={
+logout
+}
 style={{
 padding:
 "10px 17px",
@@ -3982,9 +3297,8 @@ background:
 "#13222c",
 color:
 "#dce6e9",
-fontWeight: 700,
-cursor:
-"pointer",
+fontWeight:
+700,
 }}
 >
 Esci
@@ -4016,7 +3330,8 @@ style={{
 color:
 "#16c784",
 fontSize: 12,
-fontWeight: 900,
+fontWeight:
+900,
 }}
 >
 AREA PERSONALE
@@ -4057,7 +3372,8 @@ marginTop: 20,
 >
 <h2
 style={{
-marginTop: 0,
+marginTop:
+0,
 }}
 >
 I miei documenti
@@ -4114,6 +3430,7 @@ marginTop: 5,
 {
 doc.file_name
 }
+
 {doc.month
 ? ` · ${MONTHS[doc.month - 1]} ${doc.year}`
 : ` · ${doc.year}`}
@@ -4136,7 +3453,8 @@ doc.expiry_date
 ? "#ffc857"
 : "#81919a",
 fontSize: 12,
-fontWeight: 700,
+fontWeight:
+700,
 }}
 >
 Scadenza:{" "}
@@ -4180,7 +3498,8 @@ Apri PDF
 
 <div
 style={{
-marginTop: 20,
+marginTop:
+20,
 padding: 16,
 background:
 "#13222c",
