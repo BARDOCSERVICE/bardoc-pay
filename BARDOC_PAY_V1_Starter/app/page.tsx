@@ -678,7 +678,46 @@ function AdminDashboard(props: any) {
       </>}
 
       {activeSection === "deadlines" && <><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20 }}><Stat title="Documenti in scadenza" value={expiringDocuments.length} alert /><Stat title="Documenti scaduti" value={expiredDocuments.length} danger /></div><DeadlineList title="Documenti scaduti" items={expiredDocuments} danger employees={allEmployees} /><DeadlineList title="Documenti in scadenza entro 30 giorni" items={expiringDocuments} alert employees={allEmployees} /></>}
+    
+
+      <div style={{ ...cardStyle, marginBottom: 20 }}><h2 style={{ marginTop: 0 }}>💬 Comunicazioni</h2>{communications.length === 0 ? <p style={{ color: "#81919a" }}>Non ci sono comunicazioni.</p> : <>{[...general, ...personal].map(c => <CommunicationCard key={c.id} communication={c} general={c.is_general} />)}</>}</div>
+
+      <div style={{ ...cardStyle, marginBottom: 20 }}>
+        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
+        <p style={{ color: "#81919a", fontSize: 13, lineHeight: 1.6 }}>
+          Hai bisogno di assistenza o vuoi inviare una richiesta?
+          Premi il pulsante qui sotto: il messaggio verrà inviato direttamente
+          al Centro Messaggi dell'Amministrazione.
+        </p>
+
+        <button
+          onClick={() => setContactOpen(true)}
+          style={{ ...buttonStyle, width: "100%", marginTop: 10 }}
+        >
+          CONTATTA L'AMMINISTRAZIONE
+        </button>
+      </div>
+
+
     </section>
+  
+      {contactOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.65)", display:"flex", justifyContent:"center", alignItems:"center", zIndex:999, padding:20 }}>
+          <div style={{ width:"100%", maxWidth:520, background:"#172630", border:"1px solid #2f4652", borderRadius:18, padding:24 }}>
+            <h2 style={{ marginTop:0 }}>Contatta l'Amministrazione</h2>
+            <p style={{ color:"#8ea0aa", fontSize:13, marginBottom:18 }}>
+              Invia una richiesta direttamente al Centro Messaggi dell'amministrazione.
+            </p>
+            <input value={subject} onChange={e=>setSubject(e.target.value)} placeholder="Oggetto" style={inputStyle}/>
+            <textarea value={contactMessage} onChange={e=>setContactMessage(e.target.value)} placeholder="Scrivi il messaggio..." rows={6} style={{...inputStyle,marginTop:12,resize:"vertical"}}/>
+            <div style={{ display:"flex", gap:12, marginTop:20 }}>
+              <button onClick={()=>setContactOpen(false)} style={{...secondaryButton,flex:1}}>Annulla</button>
+              <button onClick={sendAdminRequest} style={{...buttonStyle,flex:1}}>Invia</button>
+            </div>
+          </div>
+        </div>
+      )}
+
   </main>;
 }
 
@@ -772,25 +811,6 @@ function EmployeeArea({ employee, profile, photoUrl, documents, communications, 
         </div>
         <div style={cardStyle}><h2 style={{ margin: "0 0 14px", color: "#16c784", fontSize: 18 }}>📊 Presenze mensili</h2><p style={{ marginTop: 0, color: "#81919a", fontSize: 12 }}>Ogni mese mostra separatamente giorni di presenza e assenza.</p><div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>{attendance.slice(0, 4).map((a: Attendance) => <MonthlyAttendanceMini key={a.id} a={a} />)}</div>{attendance.length === 0 && <div style={{ color: "#81919a" }}>Nessun dato di presenza ancora inserito.</div>}</div>
       </div>
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}><h2 style={{ marginTop: 0 }}>💬 Comunicazioni</h2>{communications.length === 0 ? <p style={{ color: "#81919a" }}>Non ci sono comunicazioni.</p> : <>{[...general, ...personal].map(c => <CommunicationCard key={c.id} communication={c} general={c.is_general} />)}</>}</div>
-
-      <div style={{ ...cardStyle, marginBottom: 20 }}>
-        <h2 style={{ marginTop: 0 }}>💬 Contatta l'Amministrazione</h2>
-        <p style={{ color: "#81919a", fontSize: 13, lineHeight: 1.6 }}>
-          Hai bisogno di assistenza o vuoi inviare una richiesta?
-          Premi il pulsante qui sotto: il messaggio verrà inviato direttamente
-          al Centro Messaggi dell'Amministrazione.
-        </p>
-
-        <button
-          onClick={() => alert("Collega qui il popup o la funzione di invio già presente nel progetto.")}
-          style={{ ...buttonStyle, width: "100%", marginTop: 10 }}
-        >
-          CONTATTA L'AMMINISTRAZIONE
-        </button>
-      </div>
-
       <div style={cardStyle}>
         <h2 style={{ marginTop: 0 }}>💰 Retribuzione</h2>
         <p style={{ color: "#81919a", fontSize: 13 }}>Apri un anno per visualizzare i mesi. Gli extra e i premi compaiono soltanto quando sono stati effettivamente caricati.</p>
