@@ -317,6 +317,11 @@ useState("dashboard");
 
 const [search, setSearch] = useState("");
 
+// Dipendente selezionato nella sezione "Gestione dipendenti".
+// È separato da selectedEmployee, che viene usato nel modulo di caricamento documenti.
+const [selectedEmployeeCard, setSelectedEmployeeCard] =
+useState<Employee | null>(null);
+
 /* =====================================================
 DOCUMENTI
 ===================================================== */
@@ -1683,53 +1688,6 @@ documentType ===
 documentType ===
 "driver_license";
 
-const selectedEmployeeData =
-allEmployees.find(
-(emp: Employee) =>
-emp.id === selectedEmployee
-) || null;
-
-const selectedEmployeeDocuments =
-selectedEmployeeData
-? documents.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeData.id
-)
-: [];
-
-const selectedEmployeePayslips =
-selectedEmployeeData
-? payslips.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeData.id
-)
-: [];
-
-const selectedEmployeeStatements =
-selectedEmployeeData
-? paymentStatements.filter(
-(doc: Document) =>
-doc.employee_id ===
-selectedEmployeeData.id
-)
-: [];
-
-const employeeActionButton = {
-border:
-"1px solid #16c784",
-background:
-"#132a33",
-color:
-"#e9f0f2",
-borderRadius: 10,
-padding:
-"10px 14px",
-cursor: "pointer",
-fontWeight: 800,
-};
-
 return (
 <main
 style={{
@@ -2172,285 +2130,46 @@ maxWidth: 360,
 />
 </div>
 
-{selectedEmployeeData && (
-<div
-style={{
-background:
-"linear-gradient(135deg,#102d39,#172630)",
-border:
-"1px solid #16c784",
-borderRadius: 16,
-padding: 20,
-marginBottom: 18,
-boxShadow:
-"0 8px 30px rgba(0,0,0,.18)",
-}}
->
-<div
-style={{
-display: "flex",
-justifyContent: "space-between",
-alignItems: "flex-start",
-gap: 18,
-}}
->
-<div
-style={{
-display: "flex",
-alignItems: "center",
-gap: 14,
-}}
->
-<EmployeeAvatar
-employee={selectedEmployeeData}
-size={64}
-/>
-
-<div>
-<div
-style={{
-fontSize: 12,
-color: "#16c784",
-fontWeight: 800,
-marginBottom: 5,
-}}
->
-SCHEDA DIPENDENTE
-</div>
-
-<h3
-style={{
-margin: 0,
-fontSize: 20,
-}}
->
-{selectedEmployeeData.full_name}
-</h3>
-
-<div
-style={{
-color: "#a9b8c0",
-fontSize: 13,
-marginTop: 5,
-}}
->
-{selectedEmployeeData.email ||
-"Nessuna email"}
-</div>
-
-{selectedEmployeeData.hire_date && (
-<div
-style={{
-color: "#82919a",
-fontSize: 12,
-marginTop: 4,
-}}
->
-Assunto il{" "}
-{formatDate(
-selectedEmployeeData.hire_date
-)}
-</div>
-)}
-</div>
-</div>
-
-<button
-type="button"
-onClick={() =>
-setSelectedEmployee("")
-}
-style={{
-border:
-"1px solid #41535d",
-background:
-"transparent",
-color: "#e9f0f2",
-borderRadius: 10,
-padding:
-"8px 12px",
-cursor: "pointer",
-fontWeight: 700,
-}}
->
-Chiudi scheda
-</button>
-</div>
-
-<div
-style={{
-display: "grid",
-gridTemplateColumns:
-"repeat(3,minmax(0,1fr))",
-gap: 10,
-marginTop: 18,
-}}
->
-<div
-style={{
-background:
-"rgba(0,0,0,.18)",
-borderRadius: 10,
-padding: 12,
-}}
->
-<div
-style={{
-fontSize: 11,
-color: "#82919a",
-}}
->
-Documenti
-</div>
-<strong>
-{selectedEmployeeDocuments.length}
-</strong>
-</div>
-
-<div
-style={{
-background:
-"rgba(0,0,0,.18)",
-borderRadius: 10,
-padding: 12,
-}}
->
-<div
-style={{
-fontSize: 11,
-color: "#82919a",
-}}
->
-Buste paga
-</div>
-<strong>
-{selectedEmployeePayslips.length}
-</strong>
-</div>
-
-<div
-style={{
-background:
-"rgba(0,0,0,.18)",
-borderRadius: 10,
-padding: 12,
-}}
->
-<div
-style={{
-fontSize: 11,
-color: "#82919a",
-}}
->
-Distinte
-</div>
-<strong>
-{selectedEmployeeStatements.length}
-</strong>
-</div>
-</div>
-
-<div
-style={{
-display: "flex",
-flexWrap: "wrap",
-gap: 10,
-marginTop: 16,
-}}
->
-<button
-type="button"
-onClick={() => {
-setSelectedEmployee(
-selectedEmployeeData.id
-);
-setCategory("retribuzione");
-setDocumentType("payslip");
-setActiveSection("payments");
-}}
-style={employeeActionButton}
->
-💶 Buste paga
-</button>
-
-<button
-type="button"
-onClick={() => {
-setSelectedEmployee(
-selectedEmployeeData.id
-);
-setActiveSection("documents");
-}}
-style={employeeActionButton}
->
-📁 Documenti
-</button>
-
-<button
-type="button"
-onClick={() => {
-setSelectedEmployee(
-selectedEmployeeData.id
-);
-setCommunicationEmployee(
-selectedEmployeeData.id
-);
-setActiveSection(
-"communications"
-);
-}}
-style={employeeActionButton}
->
-💬 Comunicazioni
-</button>
-</div>
-</div>
-)}
-
 {adminLoading ? (
 <div>
 Caricamento...
 </div>
 ) : (
-employees.map(
-(
-emp: Employee
-) => (
+<>
+{employees.map(
+(emp: Employee) => (
 <div
 key={emp.id}
-onClick={() =>
-setSelectedEmployee(emp.id)
+onClick={() => setSelectedEmployeeCard(emp)}
+role="button"
+tabIndex={0}
+onKeyDown={(e) => {
+if (e.key === "Enter" || e.key === " ") {
+e.preventDefault();
+setSelectedEmployeeCard(emp);
 }
+}}
 style={{
 borderTop:
 "1px solid #263841",
 padding:
-"15px 0",
+"15px 8px",
 display:
 "flex",
 justifyContent:
 "space-between",
 alignItems:
 "center",
-cursor: "pointer",
-background:
-selectedEmployee === emp.id
-? "rgba(22,199,132,.08)"
-: "transparent",
+cursor:
+"pointer",
 borderRadius:
-selectedEmployee === emp.id
-? 10
-: 0,
-paddingLeft:
-selectedEmployee === emp.id
-? 10
-: 0,
-paddingRight:
-selectedEmployee === emp.id
-? 10
-: 0,
+10,
+background:
+selectedEmployeeCard?.id === emp.id
+? "#203b2f"
+: "transparent",
 transition:
-"background .15s ease",
+"background 0.15s ease",
 }}
 >
 <div
@@ -2469,9 +2188,7 @@ size={48}
 
 <div>
 <strong>
-{
-emp.full_name
-}
+{emp.full_name}
 </strong>
 
 <div
@@ -2484,8 +2201,7 @@ marginTop:
 4,
 }}
 >
-{emp.email ||
-"Nessuna email"}
+{emp.email || "Nessuna email"}
 </div>
 
 {emp.hire_date && (
@@ -2500,14 +2216,19 @@ marginTop:
 }}
 >
 Dal{" "}
-{formatDate(
-emp.hire_date
-)}
+{formatDate(emp.hire_date)}
 </div>
 )}
 </div>
 </div>
 
+<div
+style={{
+display: "flex",
+alignItems: "center",
+gap: 12,
+}}
+>
 <span
 style={{
 color:
@@ -2518,11 +2239,192 @@ fontWeight:
 800,
 }}
 >
-Attivo
+{emp.active ? "Attivo" : "Non attivo"}
+</span>
+
+<span
+style={{
+color:
+"#9fb0b8",
+fontSize:
+12,
+fontWeight:
+800,
+}}
+>
+Apri scheda →
 </span>
 </div>
+</div>
 )
-)
+)}
+
+{selectedEmployeeCard && (
+<div
+style={{
+marginTop: 20,
+padding: 22,
+borderRadius: 16,
+border: "1px solid #2d4955",
+background: "linear-gradient(135deg,#12232d,#18312c)",
+}}
+>
+<div
+style={{
+display: "flex",
+justifyContent: "space-between",
+alignItems: "flex-start",
+gap: 20,
+flexWrap: "wrap",
+}}
+>
+<div
+style={{
+display: "flex",
+alignItems: "center",
+gap: 16,
+}}
+>
+<EmployeeAvatar
+employee={selectedEmployeeCard}
+size={72}
+/>
+
+<div>
+<div
+style={{
+color: "#16c784",
+fontSize: 12,
+fontWeight: 900,
+letterSpacing: 1,
+marginBottom: 5,
+}}
+>
+SCHEDA DIPENDENTE
+</div>
+
+<h3
+style={{
+margin: 0,
+fontSize: 24,
+}}
+>
+{selectedEmployeeCard.full_name}
+</h3>
+
+<div
+style={{
+marginTop: 6,
+color: "#a9b8c0",
+fontSize: 13,
+}}
+>
+{selectedEmployeeCard.email || "Nessuna email"}
+</div>
+</div>
+</div>
+
+<button
+type="button"
+onClick={() => setSelectedEmployeeCard(null)}
+style={{
+background: "#20343d",
+border: "1px solid #35515d",
+color: "#dce7ea",
+borderRadius: 10,
+padding: "9px 14px",
+cursor: "pointer",
+fontWeight: 800,
+}}
+>
+Chiudi scheda
+</button>
+</div>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))",
+gap: 12,
+marginTop: 20,
+}}
+>
+<div style={{ background: "#142a33", border: "1px solid #29434d", borderRadius: 10, padding: 14 }}>
+<div style={{ color: "#82919a", fontSize: 11 }}>STATO</div>
+<strong>{selectedEmployeeCard.active ? "Attivo" : "Non attivo"}</strong>
+</div>
+
+<div style={{ background: "#142a33", border: "1px solid #29434d", borderRadius: 10, padding: 14 }}>
+<div style={{ color: "#82919a", fontSize: 11 }}>ASSUNTO DAL</div>
+<strong>{formatDate(selectedEmployeeCard.hire_date)}</strong>
+</div>
+</div>
+
+<div
+style={{
+display: "flex",
+flexWrap: "wrap",
+gap: 10,
+marginTop: 18,
+}}
+>
+<button
+type="button"
+onClick={() => {
+setSelectedEmployee(selectedEmployeeCard.id);
+setActiveSection("payments");
+}}
+style={{
+background: "#20343d",
+border: "1px solid #35515d",
+color: "#dce7ea",
+borderRadius: 10,
+padding: "10px 14px",
+cursor: "pointer",
+fontWeight: 800,
+}}
+>
+💶 Buste paga
+</button>
+
+<button
+type="button"
+onClick={() => {
+setSelectedEmployee(selectedEmployeeCard.id);
+setActiveSection("documents");
+}}
+style={{
+background: "#20343d",
+border: "1px solid #35515d",
+color: "#dce7ea",
+borderRadius: 10,
+padding: "10px 14px",
+cursor: "pointer",
+fontWeight: 800,
+}}
+>
+📁 Documenti
+</button>
+
+<button
+type="button"
+onClick={() => setActiveSection("communications")}
+style={{
+background: "#20343d",
+border: "1px solid #35515d",
+color: "#dce7ea",
+borderRadius: 10,
+padding: "10px 14px",
+cursor: "pointer",
+fontWeight: 800,
+}}
+>
+💬 Comunicazioni
+</button>
+</div>
+</div>
+)}
+</>
 )}
 </div>
 )}
