@@ -1683,6 +1683,53 @@ documentType ===
 documentType ===
 "driver_license";
 
+const selectedEmployeeData =
+allEmployees.find(
+(emp: Employee) =>
+emp.id === selectedEmployee
+) || null;
+
+const selectedEmployeeDocuments =
+selectedEmployeeData
+? documents.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const selectedEmployeePayslips =
+selectedEmployeeData
+? payslips.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const selectedEmployeeStatements =
+selectedEmployeeData
+? paymentStatements.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const employeeActionButton = {
+border:
+"1px solid #16c784",
+background:
+"#132a33",
+color:
+"#e9f0f2",
+borderRadius: 10,
+padding:
+"10px 14px",
+cursor: "pointer",
+fontWeight: 800,
+};
+
 return (
 <main
 style={{
@@ -2125,6 +2172,241 @@ maxWidth: 360,
 />
 </div>
 
+{selectedEmployeeData && (
+<div
+style={{
+background:
+"linear-gradient(135deg,#102d39,#172630)",
+border:
+"1px solid #16c784",
+borderRadius: 16,
+padding: 20,
+marginBottom: 18,
+boxShadow:
+"0 8px 30px rgba(0,0,0,.18)",
+}}
+>
+<div
+style={{
+display: "flex",
+justifyContent: "space-between",
+alignItems: "flex-start",
+gap: 18,
+}}
+>
+<div
+style={{
+display: "flex",
+alignItems: "center",
+gap: 14,
+}}
+>
+<EmployeeAvatar
+employee={selectedEmployeeData}
+size={64}
+/>
+
+<div>
+<div
+style={{
+fontSize: 12,
+color: "#16c784",
+fontWeight: 800,
+marginBottom: 5,
+}}
+>
+SCHEDA DIPENDENTE
+</div>
+
+<h3
+style={{
+margin: 0,
+fontSize: 20,
+}}
+>
+{selectedEmployeeData.full_name}
+</h3>
+
+<div
+style={{
+color: "#a9b8c0",
+fontSize: 13,
+marginTop: 5,
+}}
+>
+{selectedEmployeeData.email ||
+"Nessuna email"}
+</div>
+
+{selectedEmployeeData.hire_date && (
+<div
+style={{
+color: "#82919a",
+fontSize: 12,
+marginTop: 4,
+}}
+>
+Assunto il{" "}
+{formatDate(
+selectedEmployeeData.hire_date
+)}
+</div>
+)}
+</div>
+</div>
+
+<button
+type="button"
+onClick={() =>
+setSelectedEmployee("")
+}
+style={{
+border:
+"1px solid #41535d",
+background:
+"transparent",
+color: "#e9f0f2",
+borderRadius: 10,
+padding:
+"8px 12px",
+cursor: "pointer",
+fontWeight: 700,
+}}
+>
+Chiudi scheda
+</button>
+</div>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"repeat(3,minmax(0,1fr))",
+gap: 10,
+marginTop: 18,
+}}
+>
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Documenti
+</div>
+<strong>
+{selectedEmployeeDocuments.length}
+</strong>
+</div>
+
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Buste paga
+</div>
+<strong>
+{selectedEmployeePayslips.length}
+</strong>
+</div>
+
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Distinte
+</div>
+<strong>
+{selectedEmployeeStatements.length}
+</strong>
+</div>
+</div>
+
+<div
+style={{
+display: "flex",
+flexWrap: "wrap",
+gap: 10,
+marginTop: 16,
+}}
+>
+<button
+type="button"
+onClick={() => {
+setSelectedEmployee(
+selectedEmployeeData.id
+);
+setCategory("retribuzione");
+setDocumentType("payslip");
+setActiveSection("payments");
+}}
+style={employeeActionButton}
+>
+💶 Buste paga
+</button>
+
+<button
+type="button"
+onClick={() => {
+setSelectedEmployee(
+selectedEmployeeData.id
+);
+setActiveSection("documents");
+}}
+style={employeeActionButton}
+>
+📁 Documenti
+</button>
+
+<button
+type="button"
+onClick={() => {
+setSelectedEmployee(
+selectedEmployeeData.id
+);
+setCommunicationEmployee(
+selectedEmployeeData.id
+);
+setActiveSection(
+"communications"
+);
+}}
+style={employeeActionButton}
+>
+💬 Comunicazioni
+</button>
+</div>
+</div>
+)}
+
 {adminLoading ? (
 <div>
 Caricamento...
@@ -2136,6 +2418,9 @@ emp: Employee
 ) => (
 <div
 key={emp.id}
+onClick={() =>
+setSelectedEmployee(emp.id)
+}
 style={{
 borderTop:
 "1px solid #263841",
@@ -2147,6 +2432,25 @@ justifyContent:
 "space-between",
 alignItems:
 "center",
+cursor: "pointer",
+background:
+selectedEmployee === emp.id
+? "rgba(22,199,132,.08)"
+: "transparent",
+borderRadius:
+selectedEmployee === emp.id
+? 10
+: 0,
+paddingLeft:
+selectedEmployee === emp.id
+? 10
+: 0,
+paddingRight:
+selectedEmployee === emp.id
+? 10
+: 0,
+transition:
+"background .15s ease",
 }}
 >
 <div
