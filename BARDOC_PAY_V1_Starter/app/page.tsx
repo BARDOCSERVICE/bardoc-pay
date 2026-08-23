@@ -765,10 +765,14 @@ setMessage("Foto del dipendente salvata correttamente. ✅");
 } catch (error: any) {
 console.error("Errore caricamento foto dipendente:", error);
 
+const errorText = error?.message || "errore sconosciuto";
+
 setMessage(
-`Errore caricamento foto: ${
-error?.message || "errore sconosciuto"
-}`
+errorText.toLowerCase().includes("row-level security") ||
+errorText.toLowerCase().includes("permission") ||
+errorText.toLowerCase().includes("policy")
+? "Foto non salvata: Supabase sta bloccando l'aggiornamento della tabella employees. Devi applicare le policy SQL del file supabase_bardoc_pay_policies.sql. ⚠️"
+: `Errore caricamento foto: ${errorText}`
 );
 } finally {
 setPhotoUploading(false);
@@ -790,7 +794,9 @@ return;
 }
 
 const confirmed = window.confirm(
-`Vuoi eliminare definitivamente "${doc.file_name}"?`
+`Vuoi eliminare definitivamente la busta paga "${doc.file_name}"?
+
+Questa operazione non può essere annullata.`
 );
 
 if (!confirmed) return;
@@ -6053,8 +6059,7 @@ color:
 Apri PDF
 </button>
 
-{allowDeletePayslip &&
-doc.document_type === "payslip" && (
+{allowDeletePayslip && (
 <button
 type="button"
 onClick={() =>
@@ -6066,7 +6071,7 @@ color: "#ff6b6b",
 border: "1px solid #6d3434",
 }}
 >
-🗑 Rimuovi
+🗑 ELIMINA BUSTA PAGA
 </button>
 )}
 </div>
