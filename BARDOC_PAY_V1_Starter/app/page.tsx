@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type Key } from "react";
 import { supabase } from "../lib/supabase";
 
 /* =========================================================
@@ -217,10 +217,35 @@ currency: "EUR",
 }
 
 /* =========================================================
+SUPABASE — FALLBACK SICURI
+========================================================= */
+
+function isTableMissingOrForbidden(error: any) {
+if (!error) return false;
+
+const status =
+error?.status ??
+error?.statusCode ??
+error?.code;
+
+return (
+status === 404 ||
+status === 403 ||
+status === "404" ||
+status === "403" ||
+error?.code === "PGRST205"
+);
+}
+
+function safeArray<T>(value: T[] | null | undefined): T[] {
+return Array.isArray(value) ? value : [];
+}
+
+/* =========================================================
 STILI
 ========================================================= */
 
-const darkInput: React.CSSProperties = {
+const darkInput: CSSProperties = {
 width: "100%",
 boxSizing: "border-box",
 padding: "13px 14px",
@@ -232,7 +257,7 @@ fontSize: 14,
 outline: "none",
 };
 
-const darkSelect: React.CSSProperties = {
+const darkSelect: CSSProperties = {
 width: "100%",
 padding: 13,
 borderRadius: 9,
@@ -243,7 +268,7 @@ boxSizing: "border-box",
 fontSize: 14,
 };
 
-const greenButton: React.CSSProperties = {
+const greenButton: CSSProperties = {
 width: "100%",
 padding: 14,
 border: "none",
@@ -254,7 +279,7 @@ fontWeight: 900,
 cursor: "pointer",
 };
 
-const secondaryButton: React.CSSProperties = {
+const secondaryButton: CSSProperties = {
 padding: "11px 16px",
 border: "1px solid #344955",
 borderRadius: 9,
@@ -418,7 +443,7 @@ LOGIN
 ===================================================== */
 
 async function handleSubmit(
-e: React.FormEvent
+e: FormEvent
 ) {
 e.preventDefault();
 
@@ -486,118 +511,136 @@ AREA DIPENDENTE
 async function loadEmployeeArea() {
 if (!session?.user?.id) return;
 
+try {
 const {
-data: emp,
-error: empError,
+ data: emp,
+ error: empError,
 } = await supabase
-.from("employees")
-.select("*")
-.eq(
-"auth_user_id",
-session.user.id
-)
-.maybeSingle();
+ .from("employees")
+ .select("*")
+ .eq("auth_user_id", session.user.id)
+ .maybeSingle();
 
 if (empError) {
-console.error(empError);
-return;
+ console.error("Errore caricamento dipendente:", empError);
+ setMessage("Impossibile caricare i dati del dipendente.");
+ return;
 }
 
-setEmployee(emp);
+setEmployee(emp ?? null);
 
-if (!emp) return;
-
-const { data: docs } =
-await supabase
-.from("documents")
-.select("*")
-.eq("employee_id", emp.id)
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
-
-setDocuments(docs || []);
-
-const {
-data: comms,
-error: commError,
-} = await supabase
-.from("communications")
-.select("*")
-.order("created_at", {
-ascending: false,
-});
-
-if (!commError) {
-setCommunications(
-comms || []
-);
+if (!emp) {
+ setDocuments([]);
+ setCommunications([]);
+ setAttendance([]);
+ setExtraPayments([]);
+ setChatMessages([]);
+ setMessage("Nessun profilo dipendente associato a questo account.");
+ return;
 }
 
-/* PRESENZE */
-
+/* DOCUMENTI */
 const {
-data: attendanceData,
-error: attendanceError,
+ data: docs,
+ error: docsError,
 } = await supabase
-.from("attendance")
-.select("*")
-.eq("employee_id", emp.id)
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
+ .from("documents")
+ .select("*")
+ .eq("employee_id", emp.id)
+ .order("year", { ascending: false })
+ .order("month", { ascending: false });
 
-if (!attendanceError) {
-setAttendance(
-attendanceData || []
-);
+if (docsError) {
+ console.error("Errore caricamento documenti:", docsError);
+ setDocuments([]);
+} else {
+ setDocuments(safeArray(docs));
 }
 
-/* EXTRA / PREMI */
-
+/* COMUNICAZIONI */
 const {
-data: extraData,
-error: extraError,
+ data: comms,
+ error: commError,
 } = await supabase
-.from("extra_payments")
-.select("*")
-.eq("employee_id", emp.id)
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
+ .from("communications")
+ .select("*")
+ .order("created_at", { ascending: false });
 
-if (!extraError) {
-setExtraPayments(
-extraData || []
-);
+if (commError) {
+ console.error("Errore caricamento comunicazioni:", commError);
+ setCommunications([]);
+} else {
+ setCommunications(safeArray(comms));
+}
+
+/* PRESENZE — TABELLA OPZIONALE */
+const {
+ data: attendanceData,
+ error: attendanceError,
+} = await supabase
+ .from("attendance")
+ .select("*")
+ .eq("employee_id", emp.id)
+ .order("year", { ascending: false })
+ .order("month", { ascending: false });
+
+if (attendanceError) {
+ if (isTableMissingOrForbidden(attendanceError)) {
+  console.warn("BARDOC PAY: tabella attendance non disponibile o non autorizzata. Uso [].", attendanceError);
+ } else {
+  console.error("Errore caricamento presenze:", attendanceError);
+ }
+ setAttendance([]);
+} else {
+ setAttendance(safeArray(attendanceData));
+}
+
+/* EXTRA / PREMI — TABELLA OPZIONALE */
+const {
+ data: extraData,
+ error: extraError,
+} = await supabase
+ .from("extra_payments")
+ .select("*")
+ .eq("employee_id", emp.id)
+ .order("year", { ascending: false })
+ .order("month", { ascending: false });
+
+if (extraError) {
+ if (isTableMissingOrForbidden(extraError)) {
+  console.warn("BARDOC PAY: tabella extra_payments non disponibile o non autorizzata. Uso [].", extraError);
+ } else {
+  console.error("Errore caricamento extra/premi:", extraError);
+ }
+ setExtraPayments([]);
+} else {
+ setExtraPayments(safeArray(extraData));
 }
 
 /* CHAT */
-
 const {
-data: chatData,
-error: chatError,
+ data: chatData,
+ error: chatError,
 } = await supabase
-.from("chat_messages")
-.select("*")
-.eq("employee_id", emp.id)
-.order("created_at", {
-ascending: true,
-});
+ .from("chat_messages")
+ .select("*")
+ .eq("employee_id", emp.id)
+ .order("created_at", { ascending: true });
 
-if (!chatError) {
-setChatMessages(
-chatData || []
-);
+if (chatError) {
+ console.error("Errore caricamento chat:", chatError);
+ setChatMessages([]);
+} else {
+ setChatMessages(safeArray(chatData));
+}
+} catch (error) {
+console.error("Errore inatteso durante il caricamento dell'area dipendente:", error);
+setDocuments([]);
+setCommunications([]);
+setAttendance([]);
+setExtraPayments([]);
+setChatMessages([]);
+setMessage("Alcuni dati non sono momentaneamente disponibili. L'area personale resta accessibile.");
 }
 }
 
@@ -608,74 +651,79 @@ AREA ADMIN
 async function loadAdminData() {
 setAdminLoading(true);
 
+try {
 const {
-data: employeeData,
-error: employeeError,
+ data: employeeData,
+ error: employeeError,
 } = await supabase
-.from("employees")
-.select("*")
-.eq("active", true)
-.order("full_name");
+ .from("employees")
+ .select("*")
+ .eq("active", true)
+ .order("full_name");
 
-if (!employeeError) {
-setEmployees(
-employeeData || []
-);
+if (employeeError) {
+ console.error("Errore caricamento dipendenti:", employeeError);
+ setEmployees([]);
+} else {
+ setEmployees(safeArray(employeeData));
 }
 
-const { data: docs } =
-await supabase
-.from("documents")
-.select("*")
-.order("year", {
-ascending: false,
-})
-.order("month", {
-ascending: false,
-});
+const {
+ data: docs,
+ error: docsError,
+} = await supabase
+ .from("documents")
+ .select("*")
+ .order("year", { ascending: false })
+ .order("month", { ascending: false });
 
-setAllDocuments(
-docs || []
-);
+if (docsError) {
+ console.error("Errore caricamento documenti:", docsError);
+ setAllDocuments([]);
+} else {
+ setAllDocuments(safeArray(docs));
+}
 
 const {
-data: comms,
-} =
-await supabase
-.from("communications")
-.select("*")
-.order("created_at", {
-ascending: false,
-});
+ data: comms,
+ error: commError,
+} = await supabase
+ .from("communications")
+ .select("*")
+ .order("created_at", { ascending: false });
 
-setAdminCommunications(
-comms || []
-);
+if (commError) {
+ console.error("Errore caricamento comunicazioni:", commError);
+ setAdminCommunications([]);
+} else {
+ setAdminCommunications(safeArray(comms));
+}
 
 /* MESSAGGI CONTATTA AMMINISTRAZIONE */
 const {
-data: adminChatData,
-error: adminChatError,
+ data: adminChatData,
+ error: adminChatError,
 } = await supabase
-.from("chat_messages")
-.select("*")
-.order("created_at", {
-ascending: false,
-});
+ .from("chat_messages")
+ .select("*")
+ .order("created_at", { ascending: false });
 
-if (!adminChatError) {
-setAdminChatMessages(
-adminChatData || []
-);
+if (adminChatError) {
+ console.error("Errore caricamento messaggi:", adminChatError);
+ setAdminChatMessages([]);
 } else {
-console.error(
-"Errore caricamento messaggi:",
-adminChatError
-);
-setAdminChatMessages([]);
+ setAdminChatMessages(safeArray(adminChatData));
 }
-
+} catch (error) {
+console.error("Errore inatteso durante il caricamento dell'area amministrazione:", error);
+setEmployees([]);
+setAllDocuments([]);
+setAdminCommunications([]);
+setAdminChatMessages([]);
+setMessage("Alcuni dati amministrativi non sono momentaneamente disponibili.");
+} finally {
 setAdminLoading(false);
+}
 }
 
 /* =====================================================
@@ -1090,16 +1138,17 @@ FILTRO DIPENDENTI
 
 const filteredEmployees =
 useMemo(() => {
+const employeeList = safeArray<Employee>(employees);
 const q =
 search
 .trim()
 .toLowerCase();
 
 if (!q) {
-return employees;
+return employeeList;
 }
 
-return employees.filter(
+return employeeList.filter(
 (emp) =>
 emp.full_name
 .toLowerCase()
@@ -1153,7 +1202,7 @@ doc,
 employee:
 employees.find(
 (emp) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 ),
 }))
@@ -1176,7 +1225,7 @@ doc,
 employee:
 employees.find(
 (emp) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 ),
 }))
@@ -3020,7 +3069,7 @@ comm.is_general
 (
 emp: Employee
 ) =>
-emp.id ===
+emp.id ===
 comm.employee_id
 )
 ?.full_name ||
@@ -3332,6 +3381,12 @@ openDocument,
 logout,
 session,
 }: any) {
+const safeDocuments = safeArray<Document>(documents);
+const safeCommunications = safeArray<Communication>(communications);
+const safeAttendance = safeArray<Attendance>(attendance);
+const safeExtraPayments = safeArray<ExtraPayment>(extraPayments);
+const safeChatMessages = safeArray<ChatMessage>(chatMessages);
+
 const [openYears, setOpenYears] =
 useState<Record<number, boolean>>(
 {}
@@ -3354,13 +3409,13 @@ setContactOpen(false);
 }
 
 const generalCommunications =
-communications.filter(
+safeCommunications.filter(
 (item: Communication) =>
 item.is_general
 );
 
 const personalCommunications =
-communications.filter(
+safeCommunications.filter(
 (item: Communication) =>
 !item.is_general
 );
@@ -3373,7 +3428,7 @@ const years = useMemo(() => {
 const set =
 new Set<number>();
 
-documents.forEach(
+safeDocuments.forEach(
 (doc: Document) => {
 if (
 doc.document_type ===
@@ -3386,13 +3441,13 @@ set.add(doc.year);
 }
 );
 
-attendance.forEach(
+safeAttendance.forEach(
 (item: Attendance) => {
 set.add(item.year);
 }
 );
 
-extraPayments.forEach(
+safeExtraPayments.forEach(
 (item: ExtraPayment) => {
 set.add(item.year);
 }
@@ -3415,9 +3470,9 @@ return Array.from(set).sort(
 (a, b) => b - a
 );
 }, [
-documents,
-attendance,
-extraPayments,
+safeDocuments,
+safeAttendance,
+safeExtraPayments,
 employee,
 ]);
 
@@ -3702,7 +3757,7 @@ fontSize:
 Riepilogo mensile delle presenze e delle assenze.
 </p>
 
-{attendance.length ===
+{safeAttendance.length ===
 0 ? (
 <div
 style={{
@@ -3722,7 +3777,7 @@ gridTemplateColumns:
 gap: 16,
 }}
 >
-{attendance
+{safeAttendance
 .slice()
 .sort(
 (
@@ -3895,7 +3950,7 @@ index +
 1;
 
 const monthDocs =
-documents.filter(
+safeDocuments.filter(
 (
 doc: Document
 ) =>
@@ -3912,7 +3967,7 @@ doc.document_type ===
 );
 
 const monthExtra =
-extraPayments.filter(
+safeExtraPayments.filter(
 (
 extra: ExtraPayment
 ) =>
@@ -3923,7 +3978,7 @@ monthNumber
 );
 
 const monthAttendance =
-attendance.find(
+safeAttendance.find(
 (
 item: Attendance
 ) =>
@@ -4208,7 +4263,7 @@ fontSize:
 Comunicazioni ricevute dall'amministrazione.
 </p>
 
-{communications.length ===
+{safeCommunications.length ===
 0 ? (
 <div
 style={{
@@ -4279,7 +4334,7 @@ marginTop:
 📁 I miei documenti
 </h2>
 
-{documents.length ===
+{safeDocuments.length ===
 0 ? (
 <p
 style={{
@@ -4290,7 +4345,7 @@ color:
 Non sono presenti documenti.
 </p>
 ) : (
-documents.map(
+safeDocuments.map(
 (
 doc: Document
 ) => (
@@ -4714,6 +4769,7 @@ function AttendanceCard({
 item,
 }: {
 item: Attendance;
+key?: Key;
 }) {
 const total =
 item.present_days +
@@ -4938,6 +4994,7 @@ general,
 }: {
 communication: Communication;
 general?: boolean;
+key?: Key;
 }) {
 return (
 <div
@@ -5309,7 +5366,7 @@ employees.find(
 (
 emp: Employee
 ) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 );
 
