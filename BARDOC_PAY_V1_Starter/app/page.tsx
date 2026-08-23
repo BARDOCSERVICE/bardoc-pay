@@ -1398,6 +1398,12 @@ chatInput={chatInput}
 setChatInput={
 setChatInput
 }
+message={
+message
+}
+submitting={
+submitting
+}
 sendChatMessage={
 sendEmployeeChatMessage
 }
@@ -3126,6 +3132,8 @@ extraPayments,
 chatMessages,
 chatInput,
 setChatInput,
+message,
+submitting,
 sendChatMessage,
 openDocument,
 logout,
