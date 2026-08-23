@@ -27,7 +27,6 @@ month: number | null;
 year: number;
 file_name: string;
 storage_path: string;
-tax_code: string | null;
 expiry_date: string | null;
 };
 
@@ -877,9 +876,6 @@ file_name:
 file.name,
 storage_path:
 storagePath,
-tax_code:
-normalizedTaxCode ||
-null,
 expiry_date:
 expiryDate ||
 null,
