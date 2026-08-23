@@ -238,6 +238,12 @@ function writeUint32(view: DataView, offset: number, value: number) {
 view.setUint32(offset, value >>> 0, true);
 }
 
+function uint8ArrayToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+const buffer = new ArrayBuffer(bytes.byteLength);
+new Uint8Array(buffer).set(bytes);
+return buffer;
+}
+
 function makeZipBlob(
 files: { name: string; bytes: Uint8Array }[]
 ) {
@@ -301,7 +307,7 @@ offset += 30 + nameBytes.length + data.length;
 
 const centralOffset = offset;
 const centralSize = centralParts.reduce(
-(total, part) => total + part.length,
+(total, part) => total + part.byteLength,
 0
 );
 
@@ -316,10 +322,28 @@ writeUint32(endView, 12, centralSize);
 writeUint32(endView, 16, centralOffset);
 writeUint16(endView, 20, 0);
 
-return new Blob(
-[...localParts, ...centralParts, new Uint8Array(end)],
-{ type: "application/zip" }
+const allParts: ArrayBuffer[] = [
+...localParts.map(uint8ArrayToArrayBuffer),
+...centralParts.map(uint8ArrayToArrayBuffer),
+end,
+];
+
+const totalSize = allParts.reduce(
+(total, part) => total + part.byteLength,
+0
 );
+
+const zipBuffer = new ArrayBuffer(totalSize);
+const zipView = new Uint8Array(zipBuffer);
+let cursor = 0;
+
+for (const part of allParts) {
+const partView = new Uint8Array(part);
+zipView.set(partView, cursor);
+cursor += partView.byteLength;
+}
+
+return new Blob([zipBuffer], { type: "application/zip" });
 }
 
 async function downloadPayslipsZip(
