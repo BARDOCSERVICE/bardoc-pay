@@ -492,8 +492,8 @@ useState<ChatMessage[]>([]);
 const [adminChatInput, setAdminChatInput] =
 useState("");
 
-const [adminChatSending, setAdminChatSending] =
-useState(false);
+const [replyingToEmployeeId, setReplyingToEmployeeId] =
+useState<string | null>(null);
 
 const [adminLoading, setAdminLoading] =
 useState(false);
@@ -672,21 +672,25 @@ employee: Employee | null
 ): Promise<Employee | null> {
 if (!employee?.photo_url) return employee;
 
-const isStoragePhotoPath =
-employee.photo_url.startsWith(`${employee.id}/`) ||
+// Le nuove foto vengono salvate nel bucket dedicato "employee-photos".
+// Manteniamo anche la compatibilità con eventuali vecchi percorsi.
+const isEmployeePhotoPath =
 employee.photo_url.startsWith("employee-photos/");
 
-if (!isStoragePhotoPath) {
+if (!isEmployeePhotoPath) {
 return employee;
 }
+
+const storagePath =
+employee.photo_url.replace("employee-photos/", "");
 
 const {
 data,
 error,
 } = await supabase.storage
-.from("payroll-documents")
+.from("employee-photos")
 .createSignedUrl(
-employee.photo_url,
+storagePath,
 60 * 60 * 24 * 7
 );
 
@@ -856,136 +860,139 @@ setPhotoUploading(true);
 setMessage("");
 
 try {
-const reader = new FileReader();
+const extension =
+file.type === "image/png"
+? "png"
+: file.type === "image/webp"
+? "webp"
+: "jpg";
 
-const dataUrl = await new Promise<string>(
-(resolve, reject) => {
-reader.onerror = () =>
-reject(
-new Error("Impossibile leggere la foto.")
-);
+const storagePath =
+`${employeeId}/${crypto.randomUUID()}.${extension}`;
 
-reader.onload = () => {
-const img = new Image();
-
-img.onerror = () =>
-reject(
-new Error(
-"Il file selezionato non è un'immagine valida."
-)
-);
-
-img.onload = async () => {
-const maxSize = 800;
-const scale = Math.min(
-1,
-maxSize /
-Math.max(
-img.naturalWidth,
-img.naturalHeight
-)
-);
-
-const canvas =
-document.createElement("canvas");
-
-canvas.width = Math.max(
-1,
-Math.round(img.naturalWidth * scale)
-);
-
-canvas.height = Math.max(
-1,
-Math.round(img.naturalHeight * scale)
-);
-
-const ctx =
-canvas.getContext("2d");
-
-if (!ctx) {
-reject(
-new Error(
-"Impossibile elaborare la foto."
-)
-);
-return;
-}
-
-ctx.drawImage(
-img,
-0,
-0,
-canvas.width,
-canvas.height
-);
-
-resolve(
-canvas.toDataURL(
-"image/jpeg",
-0.82
-)
-);
-};
-
-img.src = String(reader.result);
-};
-
-reader.readAsDataURL(file);
+// Carichiamo la foto nel bucket dedicato.
+// Questo evita di mettere immagini molto grandi direttamente
+// nella colonna employees.photo_url.
+const { error: uploadError } =
+await supabase.storage
+.from("employee-photos")
+.upload(
+storagePath,
+file,
+{
+contentType: file.type,
+upsert: false,
 }
 );
 
-// IMPORTANTE:
-// il bucket "payroll-documents" accetta solo i MIME previsti per i PDF.
-// Per evitare l'errore "mime type image/jpeg is not supported" non
-// utilizziamo quel bucket per la foto. La foto viene invece salvata
-// direttamente nella colonna employees.photo_url come data URL JPEG
-// compressa. In questo modo rimane persistente anche dopo il refresh
-// e non richiede modifiche alle policy Storage.
+if (uploadError) {
+throw uploadError;
+}
+
+// Recuperiamo il vecchio percorso prima di sostituirlo.
 const {
+data: currentEmployee,
+error: currentEmployeeError,
+} = await supabase
+.from("employees")
+.select("photo_url")
+.eq("id", employeeId)
+.maybeSingle();
+
+if (currentEmployeeError) {
+throw currentEmployeeError;
+}
+
+// Salviamo nel profilo il percorso persistente del file.
+const persistedPath =
+`employee-photos/${storagePath}`;
+
+const {
+data: updatedEmployee,
 error: updateError,
 } = await supabase
 .from("employees")
 .update({
-photo_url: dataUrl,
+photo_url: persistedPath,
 })
-.eq("id", employeeId);
+.eq("id", employeeId)
+.select("id, photo_url")
+.single();
 
 if (updateError) {
 throw updateError;
 }
 
-// Verifica reale della persistenza nel database prima di aggiornare la UI.
-const {
-data: savedEmployee,
-error: verifyError,
-} = await supabase
-.from("employees")
-.select("id, photo_url")
-.eq("id", employeeId)
-.maybeSingle();
-
-if (verifyError) {
-throw verifyError;
+if (!updatedEmployee?.photo_url) {
+throw new Error(
+"La foto è stata caricata ma il profilo non è stato aggiornato."
+);
 }
 
-if (!savedEmployee?.photo_url) {
-throw new Error(
-"La foto è stata inviata ma non risulta salvata nel profilo del dipendente. Controlla la colonna photo_url e le policy RLS della tabella employees."
+// Eliminiamo la vecchia foto, se era già nel bucket dedicato.
+const oldPhoto =
+currentEmployee?.photo_url || "";
+
+if (
+oldPhoto.startsWith("employee-photos/")
+) {
+const oldPath =
+oldPhoto.replace(
+"employee-photos/",
+""
+);
+
+if (oldPath && oldPath !== storagePath) {
+const { error: oldPhotoError } =
+await supabase.storage
+.from("employee-photos")
+.remove([oldPath]);
+
+if (oldPhotoError) {
+console.warn(
+"Vecchia foto non rimossa:",
+oldPhotoError
+);
+}
+}
+}
+
+// Otteniamo subito l'URL firmato per mostrarla senza dover fare
+// un nuovo login o un refresh manuale.
+const {
+data: signedData,
+error: signedError,
+} = await supabase.storage
+.from("employee-photos")
+.createSignedUrl(
+storagePath,
+60 * 60 * 24 * 7
+);
+
+if (signedError || !signedData?.signedUrl) {
+throw signedError || new Error(
+"Foto salvata ma impossibile visualizzarla."
 );
 }
 
 setEmployees((prev) =>
 prev.map((item) =>
 item.id === employeeId
-? { ...item, photo_url: savedEmployee.photo_url }
+? {
+...item,
+photo_url:
+signedData.signedUrl,
+}
 : item
 )
 );
 
 setMessage(
-"Foto del dipendente salvata correttamente. ✅"
+"Foto del dipendente salvata nel profilo. ✅"
 );
 
+// Ricarichiamo i dati amministrativi per mantenere sincronizzata
+// la scheda del dipendente con Supabase.
 await loadAdminData();
 } catch (error: any) {
 console.error(
@@ -1569,78 +1576,6 @@ return false;
 }
 
 /* =====================================================
-CHAT AMMINISTRAZIONE
-===================================================== */
-
-async function sendAdminChatMessage(
-employeeId: string,
-messageText: string
-) {
-const text =
-messageText.trim();
-
-if (!employeeId || !text) {
-return false;
-}
-
-const userId =
-session?.user?.id;
-
-if (!userId) {
-setMessage(
-"Sessione amministratore non disponibile."
-);
-return false;
-}
-
-setAdminChatSending(true);
-setMessage("");
-
-try {
-const {
-error: insertError,
-} = await supabase
-.from("chat_messages")
-.insert({
-employee_id: employeeId,
-sender_role: "admin",
-sender_user_id: userId,
-message: text,
-});
-
-if (insertError) {
-throw new Error(
-[
-insertError.message,
-insertError.details,
-insertError.hint,
-insertError.code,
-]
-.filter(Boolean)
-.join(" | ")
-);
-}
-
-setAdminChatInput("");
-await loadAdminData();
-return true;
-} catch (error: any) {
-console.error(
-"Errore invio risposta amministrazione:",
-error
-);
-
-setMessage(
-error?.message ||
-"Impossibile inviare la risposta al dipendente."
-);
-return false;
-} finally {
-setAdminChatSending(false);
-}
-}
-
-/* =====================================================
 FILTRO DIPENDENTI
 ===================================================== */
 
@@ -1823,6 +1758,89 @@ handleSubmit={handleSubmit}
 }
 
 /* =====================================================
+CHAT AMMINISTRATORE → DIPENDENTE
+===================================================== */
+
+async function sendAdminChatMessage(
+employeeId: string
+) {
+const text =
+adminChatInput.trim();
+
+if (!employeeId || !text) return false;
+
+setSubmitting(true);
+setMessage("");
+
+try {
+const userId =
+session?.user?.id;
+
+if (!userId) {
+throw new Error(
+"Sessione amministratore non disponibile. Effettua nuovamente il login."
+);
+}
+
+const {
+error: insertError,
+} =
+await supabase
+.from("chat_messages")
+.insert({
+employee_id:
+employeeId,
+sender_role:
+"admin",
+sender_user_id:
+userId,
+message:
+text,
+});
+
+if (insertError) {
+throw new Error(
+[
+insertError.message,
+insertError.details,
+insertError.hint,
+insertError.code,
+]
+.filter(Boolean)
+.join(" | ")
+);
+}
+
+setAdminChatInput("");
+setReplyingToEmployeeId(null);
+
+await loadAdminData();
+
+setMessage(
+"Risposta inviata al dipendente. ✅"
+);
+
+return true;
+} catch (error: any) {
+console.error(
+"Errore risposta amministrazione:",
+error
+);
+
+setMessage(
+`Impossibile inviare la risposta: ${
+error?.message ||
+"errore sconosciuto"
+}`
+);
+
+return false;
+} finally {
+setSubmitting(false);
+}
+}
+
+/* =====================================================
 ADMIN
 ===================================================== */
 
@@ -1860,8 +1878,11 @@ adminChatInput
 setAdminChatInput={
 setAdminChatInput
 }
-adminChatSending={
-adminChatSending
+replyingToEmployeeId={
+replyingToEmployeeId
+}
+setReplyingToEmployeeId={
+setReplyingToEmployeeId
 }
 sendAdminChatMessage={
 sendAdminChatMessage
@@ -2215,7 +2236,8 @@ communications,
 adminChatMessages,
 adminChatInput,
 setAdminChatInput,
-adminChatSending,
+replyingToEmployeeId,
+setReplyingToEmployeeId,
 sendAdminChatMessage,
 search,
 setSearch,
@@ -3409,18 +3431,11 @@ deleteDocument={deleteDocument}
 />
 
 <PaymentStatementArchive
-statements={
-paymentStatements
-}
-employees={
-allEmployees
-}
-openDocument={
-openDocument
-}
-deleteDocument={
-deleteDocument
-}/>
+documents={paymentStatements}
+employees={allEmployees}
+openDocument={openDocument}
+deleteDocument={deleteDocument}
+/>
 </>
 )}
 
@@ -4069,7 +4084,7 @@ color: "#81919a",
 fontSize: 13,
 }}
 >
-Cronologia permanente delle conversazioni dipendente ↔ amministrazione.
+Cronologia permanente delle comunicazioni dipendente ↔ amministrazione.
 </p>
 </div>
 <div
@@ -4113,6 +4128,13 @@ emp.id ===
 chat.employee_id
 );
 
+const isEmployeeMessage =
+chat.sender_role === "employee";
+
+const isReplying =
+replyingToEmployeeId ===
+chat.employee_id;
+
 return (
 <div
 key={chat.id}
@@ -4140,11 +4162,15 @@ gap: 12,
 >
 <EmployeeAvatar
 employee={sender || null}
-size={48}
+size={46}
 />
 
 <div>
-<strong style={{ fontSize: 15 }}>
+<strong
+style={{
+fontSize: 15,
+}}
+>
 {sender?.full_name ||
 "Dipendente"}
 </strong>
@@ -4180,7 +4206,7 @@ style={{
 marginTop: 14,
 padding: 14,
 background:
-chat.sender_role === "employee"
+isEmployeeMessage
 ? "#101e28"
 : "#12342d",
 borderRadius: 12,
@@ -4206,138 +4232,45 @@ flexWrap: "wrap",
 style={{
 fontSize: 11,
 color:
-chat.sender_role ===
-"employee"
+isEmployeeMessage
 ? "#16c784"
-: "#81919a",
+: "#8ee6c0",
 fontWeight: 800,
 }}
 >
-{chat.sender_role ===
-"employee"
+{isEmployeeMessage
 ? "MESSAGGIO DEL DIPENDENTE"
 : "RISPOSTA DELL'AMMINISTRAZIONE"}
 </div>
 
+{isEmployeeMessage && (
 <button
 type="button"
 onClick={() => {
-setSelectedChatEmployee(
+setReplyingToEmployeeId(
 chat.employee_id
 );
 setAdminChatInput("");
 }}
 style={{
-...secondaryButton,
-color: "#16c784",
-border: "1px solid #16c784",
+...employeeActionButton,
+padding: "8px 12px",
 }}
 >
-💬 Rispondi
+💬 Rispondi al dipendente
 </button>
+)}
 </div>
 
-{selectedChatEmployee ===
-chat.employee_id && (
+{isReplying && (
 <div
 style={{
 marginTop: 14,
 padding: 14,
-background: "#0d1922",
+background: "#0d1b23",
 border:
 "1px solid #16c784",
 borderRadius: 12,
-}}
->
-<div
-style={{
-fontSize: 12,
-fontWeight: 900,
-color: "#16c784",
-marginBottom: 8,
-}}
->
-CONVERSAZIONE CON{" "}
-{sender?.full_name ||
-"DIPENDENTE"}
-</div>
-
-<div
-style={{
-maxHeight: 240,
-overflowY: "auto",
-display: "grid",
-gap: 8,
-marginBottom: 12,
-}}
->
-{adminChatMessages
-.filter(
-(item: ChatMessage) =>
-item.employee_id ===
-chat.employee_id
-)
-.sort(
-(a: ChatMessage, b: ChatMessage) =>
-new Date(a.created_at).getTime() -
-new Date(b.created_at).getTime()
-)
-.map(
-(item: ChatMessage) => (
-<div
-key={item.id}
-style={{
-padding: "9px 11px",
-borderRadius: 9,
-background:
-item.sender_role ===
-"admin"
-? "#12342d"
-: "#172630",
-border:
-"1px solid #293c47",
-}}
->
-<div
-style={{
-fontSize: 10,
-fontWeight: 900,
-color:
-item.sender_role ===
-"admin"
-? "#16c784"
-: "#a9b8c0",
-marginBottom: 4,
-}}
->
-{item.sender_role ===
-"admin"
-? "AMMINISTRAZIONE"
-: "DIPENDENTE"}{" "}
-·{" "}
-{formatCommunicationDate(
-item.created_at
-)}
-</div>
-<div
-style={{
-fontSize: 13,
-color: "#dce6e9",
-whiteSpace: "pre-wrap",
-}}
->
-{item.message}
-</div>
-</div>
-)
-)}
-</div>
-
-<div
-style={{
-display: "flex",
-gap: 8,
-alignItems: "flex-end",
 }}
 >
 <textarea
@@ -4347,61 +4280,68 @@ setAdminChatInput(
 e.target.value
 )
 }
-placeholder="Scrivi una risposta al dipendente..."
-rows={3}
+placeholder="Scrivi la risposta al dipendente..."
+rows={4}
 style={{
-...darkInput,
+width: "100%",
+boxSizing: "border-box",
 resize: "vertical",
+background: "#101e28",
+border: "1px solid #304550",
+borderRadius: 10,
+padding: 12,
+color: "#e9f0f2",
+fontFamily: "inherit",
+outline: "none",
 }}
 />
+
+<div
+style={{
+display: "flex",
+gap: 8,
+justifyContent: "flex-end",
+marginTop: 10,
+}}
+>
+<button
+type="button"
+onClick={() => {
+setReplyingToEmployeeId(
+null
+);
+setAdminChatInput("");
+}}
+style={secondaryButton}
+>
+Annulla
+</button>
 
 <button
 type="button"
 disabled={
-adminChatSending ||
+submitting ||
 !adminChatInput.trim()
 }
-onClick={async () => {
-const sent =
-await sendAdminChatMessage(
-chat.employee_id,
-adminChatInput
-);
-
-if (sent) {
-setSelectedChatEmployee("");
+onClick={() =>
+sendAdminChatMessage(
+chat.employee_id
+)
 }
-}}
 style={{
 ...greenButton,
-width: "auto",
-minWidth: 150,
 opacity:
-adminChatSending ||
+submitting ||
 !adminChatInput.trim()
-? 0.55
+? 0.6
 : 1,
 }}
 >
-{adminChatSending
+{submitting
 ? "INVIO..."
 : "INVIA RISPOSTA"}
 </button>
 </div>
-
-<button
-type="button"
-onClick={() =>
-setSelectedChatEmployee("")
-}
-style={{
-...secondaryButton,
-marginTop: 8,
-fontSize: 11,
-}}
->
-Chiudi conversazione
-</button>
 </div>
 )}
 </div>
@@ -6679,16 +6619,16 @@ padding: "8px 12px",
 }
 
 /* =========================================================
-ARCHIVIO DISTINTE DI PAGAMENTO
+ARCHIVIO DISTINTE DI PAGAMENTO PER ANNO E MESE
 ========================================================= */
 
 function PaymentStatementArchive({
-statements,
+documents,
 employees,
 openDocument,
 deleteDocument,
 }: {
-statements: Document[];
+documents: Document[];
 employees: Employee[];
 openDocument: (doc: Document) => void;
 deleteDocument: (id: string) => void;
@@ -6699,12 +6639,10 @@ useState<Record<number, boolean>>({});
 const years = useMemo(() => {
 return Array.from(
 new Set(
-statements.map(
-(doc) => doc.year
-)
+documents.map((doc) => doc.year)
 )
 ).sort((a, b) => b - a);
-}, [statements]);
+}, [documents]);
 
 return (
 <div
@@ -6718,7 +6656,7 @@ marginTop: 20,
 >
 <div>
 <h3 style={{ margin: "0 0 5px" }}>
-📚 Archivio distinte di pagamento
+📁 Archivio distinte di pagamento
 </h3>
 <div
 style={{
@@ -6726,7 +6664,7 @@ color: "#81919a",
 fontSize: 12,
 }}
 >
-Documenti organizzati per anno e mese.
+Distinte organizzate per anno e mese, come l'archivio delle buste paga.
 </div>
 </div>
 
@@ -6742,7 +6680,7 @@ Nessuna distinta di pagamento presente.
 ) : (
 years.map((year) => {
 const yearDocs =
-statements
+documents
 .filter(
 (doc) =>
 doc.year === year
@@ -6767,45 +6705,34 @@ marginTop: 12,
 overflow: "hidden",
 }}
 >
-<div
-style={{
-display: "flex",
-alignItems: "center",
-background:
-isOpen
-? "#12342d"
-: "#101e28",
-padding: 12,
-}}
->
 <button
 type="button"
 onClick={() =>
 setOpenYears(
 (prev) => ({
 ...prev,
-[year]: !prev[year],
+[year]:
+!prev[year],
 })
 )
 }
 style={{
-flex: 1,
+width: "100%",
 border: "none",
 background:
-"transparent",
+isOpen
+? "#12342d"
+: "#101e28",
 color: "#fff",
-padding:
-"7px 8px",
+padding: "14px 16px",
 textAlign: "left",
 cursor: "pointer",
 fontWeight: 900,
 fontSize: 16,
 }}
 >
-📅 Anno {year} ·{" "}
-{yearDocs.length}{" "}
-{yearDocs.length ===
-1
+📅 Anno {year} · {yearDocs.length}{" "}
+{yearDocs.length === 1
 ? "distinta"
 : "distinte"}
 <span
@@ -6817,14 +6744,9 @@ marginLeft: 10,
 {isOpen ? "−" : "+"}
 </span>
 </button>
-</div>
 
 {isOpen && (
-<div
-style={{
-padding: 12,
-}}
->
+<div style={{ padding: 12 }}>
 {MONTHS.map(
 (
 monthName,
@@ -6867,6 +6789,7 @@ monthDocs.length
 <strong>
 {monthName}
 </strong>
+
 <div
 style={{
 color:
@@ -6878,7 +6801,15 @@ marginTop: 4,
 }}
 >
 {monthDocs.length
-? `${monthDocs.length} distinta${monthDocs.length > 1 ? "e" : ""} presente${monthDocs.length > 1 ? "i" : ""}`
+? `${monthDocs.length} distinta${
+monthDocs.length > 1
+? "e"
+: ""
+} presente${
+monthDocs.length > 1
+? "i"
+: ""
+}`
 : "Nessuna distinta caricata"}
 </div>
 </div>
@@ -6887,8 +6818,7 @@ marginTop: 4,
 style={{
 display: "flex",
 gap: 8,
-flexWrap:
-"wrap",
+flexWrap: "wrap",
 }}
 >
 {monthDocs.map(
@@ -6914,15 +6844,13 @@ flexWrap:
 >
 <div
 style={{
-color:
-"#cbd6da",
 fontSize: 12,
+color: "#cbd6da",
+marginRight: 4,
 }}
 >
 {emp?.full_name ||
-"Dipendente"}{" "}
-·{" "}
-{doc.file_name}
+"Dipendente"}
 </div>
 
 <button
@@ -6932,8 +6860,7 @@ openDocument(doc)
 }
 style={{
 ...secondaryButton,
-color:
-"#16c784",
+color: "#16c784",
 padding:
 "8px 12px",
 }}
@@ -6948,8 +6875,7 @@ deleteDocument(doc.id)
 }
 style={{
 ...secondaryButton,
-color:
-"#ff6b6b",
+color: "#ff6b6b",
 border:
 "1px solid #6d3434",
 padding:
