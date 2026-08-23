@@ -670,119 +670,104 @@ setPhotoUploading(true);
 setMessage("");
 
 try {
+const dataUrl = await new Promise<string>((resolve, reject) => {
 const reader = new FileReader();
 
-const dataUrl = await new Promise<string>(
-(resolve, reject) => {
 reader.onerror = () =>
-reject(
-new Error("Impossibile leggere la foto.")
-);
+reject(new Error("Impossibile leggere la foto."));
 
 reader.onload = () => {
 const img = new Image();
 
 img.onerror = () =>
-reject(
-new Error(
-"Il file selezionato non è un'immagine valida."
-)
-);
+reject(new Error("Il file selezionato non è un'immagine valida."));
 
-img.onload = async () => {
-const maxSize = 800;
+img.onload = () => {
+try {
+const maxSize = 600;
 const scale = Math.min(
 1,
-maxSize /
-Math.max(
-img.naturalWidth,
-img.naturalHeight
-)
+maxSize / Math.max(img.naturalWidth, img.naturalHeight)
 );
 
-const canvas =
-document.createElement("canvas");
+const canvas = document.createElement("canvas");
+canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
 
-canvas.width = Math.max(
-1,
-Math.round(img.naturalWidth * scale)
-);
-
-canvas.height = Math.max(
-1,
-Math.round(img.naturalHeight * scale)
-);
-
-const ctx =
-canvas.getContext("2d");
-
+const ctx = canvas.getContext("2d");
 if (!ctx) {
-reject(
-new Error(
-"Impossibile elaborare la foto."
-)
-);
+reject(new Error("Impossibile elaborare la foto."));
 return;
 }
 
-ctx.drawImage(
-img,
-0,
-0,
-canvas.width,
-canvas.height
-);
+ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-resolve(
-canvas.toDataURL(
-"image/jpeg",
-0.82
-)
-);
+const compressed = canvas.toDataURL("image/jpeg", 0.72);
+
+if (!compressed || compressed.length < 20) {
+reject(new Error("Impossibile creare la foto compressa."));
+return;
+}
+
+resolve(compressed);
+} catch (e) {
+reject(e);
+}
 };
 
 img.src = String(reader.result);
 };
 
 reader.readAsDataURL(file);
-}
-);
+});
 
-// IMPORTANTE:
-// il bucket "payroll-documents" accetta solo i MIME previsti per i PDF.
-// Per evitare l'errore "mime type image/jpeg is not supported" non
-// utilizziamo quel bucket per la foto. La foto viene invece salvata
-// direttamente nella colonna employees.photo_url come data URL JPEG
-// compressa. In questo modo rimane persistente anche dopo il refresh
-// e non richiede modifiche alle policy Storage.
-const {
-error: updateError,
-} = await supabase
+/*
+ * La foto NON viene caricata nel bucket payroll-documents.
+ * Quel bucket è destinato ai PDF e può rifiutare image/jpeg.
+ * Salviamo invece la foto JPEG compressa nella colonna employees.photo_url.
+ */
+const { data: updatedEmployee, error: updateError } = await supabase
 .from("employees")
-.update({
-photo_url: dataUrl,
-})
-.eq("id", employeeId);
+.update({ photo_url: dataUrl })
+.eq("id", employeeId)
+.select("*")
+.maybeSingle();
 
 if (updateError) {
-throw updateError;
+throw new Error(
+[
+updateError.message,
+updateError.details,
+updateError.hint,
+updateError.code,
+]
+.filter(Boolean)
+.join(" | ")
+);
 }
 
-setMessage(
-"Foto del dipendente salvata correttamente. ✅"
+if (!updatedEmployee) {
+throw new Error(
+"La foto è stata elaborata, ma il database non ha restituito il dipendente aggiornato. Controlla le policy UPDATE della tabella employees."
+);
+}
+
+/* Aggiornamento immediato dell'interfaccia: l'avatar cambia senza aspettare il refresh. */
+setEmployees((current) =>
+current.map((emp) =>
+emp.id === employeeId
+? { ...emp, ...updatedEmployee, photo_url: dataUrl }
+: emp
+)
 );
 
-await loadAdminData();
+setMessage("Foto del dipendente salvata correttamente. ✅");
 } catch (error: any) {
-console.error(
-"Errore caricamento foto dipendente:",
-error
-);
+console.error("Errore caricamento foto dipendente:", error);
 
 setMessage(
 `Errore caricamento foto: ${
-error?.message ||
-"errore sconosciuto"
+error?.message || "errore sconosciuto"
 }`
 );
 } finally {
@@ -814,41 +799,52 @@ setSubmitting(true);
 setMessage("");
 
 try {
-// Prima eliminiamo il file dallo Storage.
-if (doc.storage_path) {
-const { error: storageError } =
-await supabase.storage
-.from("payroll-documents")
-.remove([doc.storage_path]);
-
-if (storageError) {
-console.error(
-"Errore rimozione file Storage:",
-storageError
-);
-// Continuiamo comunque: il record DB va eliminato,
-// altrimenti il documento continuerebbe a comparire.
-}
-}
-
-// Poi eliminiamo il record dalla tabella documents.
-const { error: deleteError } =
-await supabase
+/*
+ * Prima eliminiamo il record dal database.
+ * È il passaggio fondamentale: così la busta sparisce dalla lista
+ * anche se, per una policy Storage, il PDF non fosse eliminabile.
+ */
+const { error: deleteError } = await supabase
 .from("documents")
 .delete()
 .eq("id", documentId);
 
 if (deleteError) {
-throw deleteError;
+throw new Error(
+[
+deleteError.message,
+deleteError.details,
+deleteError.hint,
+deleteError.code,
+]
+.filter(Boolean)
+.join(" | ")
+);
+}
+
+/* Aggiornamento immediato della lista sullo schermo. */
+setAllDocuments((current) =>
+current.filter((item) => item.id !== documentId)
+);
+
+/*
+ * Solo dopo aver eliminato il record DB proviamo a eliminare anche il PDF.
+ * Se Storage non permette la rimozione, il documento non ricompare comunque
+ * nel portale perché il record documents è già stato eliminato.
+ */
+if (doc.storage_path) {
+const { error: storageError } = await supabase.storage
+.from("payroll-documents")
+.remove([doc.storage_path]);
+
+if (storageError) {
+console.warn("PDF eliminato dal database ma non dallo Storage:", storageError);
+}
 }
 
 setMessage("Busta paga rimossa correttamente. ✅");
-await loadAdminData();
 } catch (error: any) {
-console.error(
-"Errore eliminazione documento:",
-error
-);
+console.error("Errore eliminazione documento:", error);
 
 setMessage(
 `Errore eliminazione documento: ${
