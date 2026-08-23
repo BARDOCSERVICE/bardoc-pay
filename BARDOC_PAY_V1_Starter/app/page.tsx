@@ -324,11 +324,6 @@ DOCUMENTI
 const [selectedEmployee, setSelectedEmployee] =
 useState("");
 
-const selectedEmployeeData =
-employees.find(
-(emp) => emp.id === selectedEmployee
-) ?? null;
-
 const [category, setCategory] =
 useState("retribuzione");
 
@@ -1688,6 +1683,53 @@ documentType ===
 documentType ===
 "driver_license";
 
+const selectedEmployeeData =
+allEmployees.find(
+(emp: Employee) =>
+emp.id === selectedEmployee
+) || null;
+
+const selectedEmployeeDocuments =
+selectedEmployeeData
+? documents.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const selectedEmployeePayslips =
+selectedEmployeeData
+? payslips.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const selectedEmployeeStatements =
+selectedEmployeeData
+? paymentStatements.filter(
+(doc: Document) =>
+doc.employee_id ===
+selectedEmployeeData.id
+)
+: [];
+
+const employeeActionButton = {
+border:
+"1px solid #16c784",
+background:
+"#132a33",
+color:
+"#e9f0f2",
+borderRadius: 10,
+padding:
+"10px 14px",
+cursor: "pointer",
+fontWeight: 800,
+};
+
 return (
 <main
 style={{
@@ -2077,8 +2119,10 @@ DIPENDENTI
 "employees" && (
 <div
 style={{
-background: "#172630",
-border: "1px solid #293c47",
+background:
+"#172630",
+border:
+"1px solid #293c47",
 borderRadius: 16,
 padding: 22,
 }}
@@ -2086,19 +2130,25 @@ padding: 22,
 <div
 style={{
 display: "flex",
-justifyContent: "space-between",
+justifyContent:
+"space-between",
 gap: 15,
 marginBottom: 18,
 }}
 >
 <div>
-<h2 style={{ margin: 0 }}>
+<h2
+style={{
+margin: 0,
+}}
+>
 Gestione dipendenti
 </h2>
 
 <div
 style={{
-color: "#82919a",
+color:
+"#82919a",
 fontSize: 13,
 marginTop: 5,
 }}
@@ -2109,7 +2159,11 @@ Cerca per nome o email.
 
 <input
 value={search}
-onChange={(e) => setSearch(e.target.value)}
+onChange={(e) =>
+setSearch(
+e.target.value
+)
+}
 placeholder="Cerca dipendente..."
 style={{
 ...darkInput,
@@ -2123,10 +2177,13 @@ maxWidth: 360,
 style={{
 background:
 "linear-gradient(135deg,#102d39,#172630)",
-border: "1px solid #16c784",
+border:
+"1px solid #16c784",
 borderRadius: 16,
 padding: 20,
 marginBottom: 18,
+boxShadow:
+"0 8px 30px rgba(0,0,0,.18)",
 }}
 >
 <div
@@ -2161,7 +2218,12 @@ marginBottom: 5,
 SCHEDA DIPENDENTE
 </div>
 
-<h3 style={{ margin: 0, fontSize: 20 }}>
+<h3
+style={{
+margin: 0,
+fontSize: 20,
+}}
+>
 {selectedEmployeeData.full_name}
 </h3>
 
@@ -2172,7 +2234,8 @@ fontSize: 13,
 marginTop: 5,
 }}
 >
-{selectedEmployeeData.email || "Nessuna email"}
+{selectedEmployeeData.email ||
+"Nessuna email"}
 </div>
 
 {selectedEmployeeData.hire_date && (
@@ -2183,7 +2246,10 @@ fontSize: 12,
 marginTop: 4,
 }}
 >
-Assunto il {formatDate(selectedEmployeeData.hire_date)}
+Assunto il{" "}
+{formatDate(
+selectedEmployeeData.hire_date
+)}
 </div>
 )}
 </div>
@@ -2191,19 +2257,97 @@ Assunto il {formatDate(selectedEmployeeData.hire_date)}
 
 <button
 type="button"
-onClick={() => setSelectedEmployee("")}
+onClick={() =>
+setSelectedEmployee("")
+}
 style={{
-border: "1px solid #41535d",
-background: "transparent",
+border:
+"1px solid #41535d",
+background:
+"transparent",
 color: "#e9f0f2",
 borderRadius: 10,
-padding: "8px 12px",
+padding:
+"8px 12px",
 cursor: "pointer",
 fontWeight: 700,
 }}
 >
 Chiudi scheda
 </button>
+</div>
+
+<div
+style={{
+display: "grid",
+gridTemplateColumns:
+"repeat(3,minmax(0,1fr))",
+gap: 10,
+marginTop: 18,
+}}
+>
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Documenti
+</div>
+<strong>
+{selectedEmployeeDocuments.length}
+</strong>
+</div>
+
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Buste paga
+</div>
+<strong>
+{selectedEmployeePayslips.length}
+</strong>
+</div>
+
+<div
+style={{
+background:
+"rgba(0,0,0,.18)",
+borderRadius: 10,
+padding: 12,
+}}
+>
+<div
+style={{
+fontSize: 11,
+color: "#82919a",
+}}
+>
+Distinte
+</div>
+<strong>
+{selectedEmployeeStatements.length}
+</strong>
+</div>
 </div>
 
 <div
@@ -2217,12 +2361,14 @@ marginTop: 16,
 <button
 type="button"
 onClick={() => {
-setSelectedEmployee(selectedEmployeeData.id);
+setSelectedEmployee(
+selectedEmployeeData.id
+);
 setCategory("retribuzione");
 setDocumentType("payslip");
 setActiveSection("payments");
 }}
-style={secondaryButton}
+style={employeeActionButton}
 >
 💶 Buste paga
 </button>
@@ -2230,10 +2376,12 @@ style={secondaryButton}
 <button
 type="button"
 onClick={() => {
-setSelectedEmployee(selectedEmployeeData.id);
+setSelectedEmployee(
+selectedEmployeeData.id
+);
 setActiveSection("documents");
 }}
-style={secondaryButton}
+style={employeeActionButton}
 >
 📁 Documenti
 </button>
@@ -2241,11 +2389,17 @@ style={secondaryButton}
 <button
 type="button"
 onClick={() => {
-setSelectedEmployee(selectedEmployeeData.id);
-setCommunicationEmployee(selectedEmployeeData.id);
-setActiveSection("communications");
+setSelectedEmployee(
+selectedEmployeeData.id
+);
+setCommunicationEmployee(
+selectedEmployeeData.id
+);
+setActiveSection(
+"communications"
+);
 }}
-style={secondaryButton}
+style={employeeActionButton}
 >
 💬 Comunicazioni
 </button>
@@ -2254,48 +2408,57 @@ style={secondaryButton}
 )}
 
 {adminLoading ? (
-<div>Caricamento...</div>
+<div>
+Caricamento...
+</div>
 ) : (
-employees
-.filter((emp: Employee) => {
-const q = search.trim().toLowerCase();
-if (!q) return true;
-return (
-emp.full_name.toLowerCase().includes(q) ||
-(emp.email || "").toLowerCase().includes(q)
-);
-})
-.map((emp: Employee) => (
+employees.map(
+(
+emp: Employee
+) => (
 <div
 key={emp.id}
-role="button"
-tabIndex={0}
-onClick={() => setSelectedEmployee(emp.id)}
-onKeyDown={(e) => {
-if (e.key === "Enter" || e.key === " ") {
-e.preventDefault();
-setSelectedEmployee(emp.id);
+onClick={() =>
+setSelectedEmployee(emp.id)
 }
-}}
 style={{
-borderTop: "1px solid #263841",
-padding: "15px 8px",
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
+borderTop:
+"1px solid #263841",
+padding:
+"15px 0",
+display:
+"flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
 cursor: "pointer",
-borderRadius: 10,
 background:
 selectedEmployee === emp.id
-? "rgba(22,199,132,.10)"
+? "rgba(22,199,132,.08)"
 : "transparent",
-transition: "background .15s ease",
+borderRadius:
+selectedEmployee === emp.id
+? 10
+: 0,
+paddingLeft:
+selectedEmployee === emp.id
+? 10
+: 0,
+paddingRight:
+selectedEmployee === emp.id
+? 10
+: 0,
+transition:
+"background .15s ease",
 }}
 >
 <div
 style={{
-display: "flex",
-alignItems: "center",
+display:
+"flex",
+alignItems:
+"center",
 gap: 14,
 }}
 >
@@ -2305,27 +2468,41 @@ size={48}
 />
 
 <div>
-<strong>{emp.full_name}</strong>
+<strong>
+{
+emp.full_name
+}
+</strong>
 
 <div
 style={{
-color: "#778993",
-fontSize: 12,
-marginTop: 4,
+color:
+"#778993",
+fontSize:
+12,
+marginTop:
+4,
 }}
 >
-{emp.email || "Nessuna email"}
+{emp.email ||
+"Nessuna email"}
 </div>
 
 {emp.hire_date && (
 <div
 style={{
-color: "#16c784",
-fontSize: 11,
-marginTop: 4,
+color:
+"#16c784",
+fontSize:
+11,
+marginTop:
+4,
 }}
 >
-Dal {formatDate(emp.hire_date)}
+Dal{" "}
+{formatDate(
+emp.hire_date
+)}
 </div>
 )}
 </div>
@@ -2333,15 +2510,19 @@ Dal {formatDate(emp.hire_date)}
 
 <span
 style={{
-color: "#16c784",
-fontSize: 12,
-fontWeight: 800,
+color:
+"#16c784",
+fontSize:
+12,
+fontWeight:
+800,
 }}
 >
-Apri scheda →
+Attivo
 </span>
 </div>
-))
+)
+)
 )}
 </div>
 )}
