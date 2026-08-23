@@ -307,6 +307,9 @@ useState<ExtraPayment[]>([]);
 const [chatMessages, setChatMessages] =
 useState<ChatMessage[]>([]);
 
+const [adminChatMessages, setAdminChatMessages] =
+useState<ChatMessage[]>([]);
+
 const [adminLoading, setAdminLoading] =
 useState(false);
 
@@ -470,6 +473,7 @@ setAdminCommunications([]);
 setAttendance([]);
 setExtraPayments([]);
 setChatMessages([]);
+setAdminChatMessages([]);
 
 setEmail("");
 setPassword("");
@@ -647,6 +651,29 @@ ascending: false,
 setAdminCommunications(
 comms || []
 );
+
+/* MESSAGGI CONTATTA AMMINISTRAZIONE */
+const {
+data: adminChatData,
+error: adminChatError,
+} = await supabase
+.from("chat_messages")
+.select("*")
+.order("created_at", {
+ascending: false,
+});
+
+if (!adminChatError) {
+setAdminChatMessages(
+adminChatData || []
+);
+} else {
+console.error(
+"Errore caricamento messaggi:",
+adminChatError
+);
+setAdminChatMessages([]);
+}
 
 setAdminLoading(false);
 }
@@ -1251,6 +1278,9 @@ paymentStatements
 communications={
 adminCommunications
 }
+adminChatMessages={
+adminChatMessages
+}
 search={search}
 setSearch={setSearch}
 selectedEmployee={
@@ -1582,6 +1612,7 @@ documents,
 payslips,
 paymentStatements,
 communications,
+adminChatMessages,
 search,
 setSearch,
 selectedEmployee,
@@ -1766,6 +1797,20 @@ setActiveSection(
 }
 >
 ⚠️ Scadenze
+</SidebarButton>
+
+<SidebarButton
+active={
+activeSection ===
+"admin_messages"
+}
+onClick={() =>
+setActiveSection(
+"admin_messages"
+)
+}
+>
+📨 Messaggi dipendenti
 </SidebarButton>
 
 <div
@@ -3024,6 +3069,169 @@ comm.created_at
 )
 )}
 </div>
+</>
+)}
+
+{/* =================================================
+MESSAGGI DIPENDENTI
+================================================= */}
+
+{activeSection ===
+"admin_messages" && (
+<>
+<div
+style={{
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+marginBottom: 20,
+}}
+>
+<div>
+<h2 style={{ margin: 0 }}>
+📨 Messaggi dipendenti
+</h2>
+<p
+style={{
+margin: "6px 0 0",
+color: "#81919a",
+fontSize: 13,
+}}
+>
+Richieste inviate tramite Contatta l'Amministrazione.
+</p>
+</div>
+<div
+style={{
+padding: "8px 12px",
+borderRadius: 10,
+background: "#13222c",
+color: "#16c784",
+fontWeight: 900,
+}}
+>
+{adminChatMessages.length} messaggi
+</div>
+</div>
+
+{adminChatMessages.length === 0 ? (
+<div
+style={{
+background: "#172630",
+border: "1px solid #293c47",
+borderRadius: 16,
+padding: 24,
+color: "#81919a",
+}}
+>
+Nessun messaggio ricevuto.
+</div>
+) : (
+<div
+style={{
+display: "grid",
+gap: 12,
+}}
+>
+{adminChatMessages.map(
+(chat: ChatMessage) => {
+const sender =
+allEmployees.find(
+(emp: Employee) =>
+emp.id ===
+chat.employee_id
+);
+
+return (
+<div
+key={chat.id}
+style={{
+background: "#172630",
+border: "1px solid #293c47",
+borderRadius: 16,
+padding: 18,
+}}
+>
+<div
+style={{
+display: "flex",
+justifyContent: "space-between",
+gap: 16,
+alignItems: "flex-start",
+}}
+>
+<div>
+<strong
+style={{
+fontSize: 15,
+}}
+>
+{sender?.full_name ||
+"Dipendente"}
+</strong>
+
+<div
+style={{
+marginTop: 4,
+color: "#81919a",
+fontSize: 12,
+}}
+>
+{sender?.email ||
+"Email non disponibile"}
+</div>
+</div>
+
+<div
+style={{
+color: "#81919a",
+fontSize: 11,
+whiteSpace: "nowrap",
+}}
+>
+{formatCommunicationDate(
+chat.created_at
+)}
+</div>
+</div>
+
+<div
+style={{
+marginTop: 14,
+padding: 14,
+background: "#101e28",
+borderRadius: 12,
+color: "#dce6e9",
+lineHeight: 1.6,
+whiteSpace: "pre-wrap",
+}}
+>
+{chat.message}
+</div>
+
+<div
+style={{
+marginTop: 10,
+fontSize: 11,
+color:
+chat.sender_role ===
+"employee"
+? "#16c784"
+: "#81919a",
+fontWeight: 800,
+}}
+>
+{chat.sender_role ===
+"employee"
+? "MESSAGGIO DEL DIPENDENTE"
+: "AMMINISTRAZIONE"}
+</div>
+</div>
+);
+}
+)}
+</div>
+)}
 </>
 )}
 
