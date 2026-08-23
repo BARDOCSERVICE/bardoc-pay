@@ -741,6 +741,7 @@ error?.message ||
 } finally {
 setPhotoUploading(false);
 }
+}
 
 /* =====================================================
 AREA ADMIN
