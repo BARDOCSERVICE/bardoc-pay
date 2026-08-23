@@ -481,6 +481,42 @@ setEmail("");
 setPassword("");
 }
 
+async function hydrateEmployeePhotoUrl(
+employee: Employee | null
+): Promise<Employee | null> {
+if (!employee?.photo_url) return employee;
+
+if (!employee.photo_url.startsWith("employee-photos/")) {
+return employee;
+}
+
+const {
+data,
+error,
+} = await supabase.storage
+.from("payroll-documents")
+.createSignedUrl(
+employee.photo_url,
+60 * 60 * 24 * 7
+);
+
+if (error || !data?.signedUrl) {
+console.error(
+"Errore generazione URL foto dipendente:",
+error
+);
+return {
+...employee,
+photo_url: null,
+};
+}
+
+return {
+...employee,
+photo_url: data.signedUrl,
+};
+}
+
 /* =====================================================
 AREA DIPENDENTE
 ===================================================== */
@@ -505,7 +541,10 @@ console.error(empError);
 return;
 }
 
-setEmployee(emp);
+const hydratedEmployee =
+await hydrateEmployeePhotoUrl(emp);
+
+setEmployee(hydratedEmployee);
 
 if (!emp) return;
 
@@ -627,17 +666,13 @@ setPhotoUploading(true);
 setMessage("");
 
 try {
-// Ridimensiona/comprime la foto direttamente nel browser.
-// In questo modo non serve creare un nuovo bucket Supabase.
-const dataUrl = await new Promise<string>(
-(resolve, reject) => {
 const reader = new FileReader();
 
+const dataUrl = await new Promise<string>(
+(resolve, reject) => {
 reader.onerror = () =>
 reject(
-new Error(
-"Impossibile leggere la foto."
-)
+new Error("Impossibile leggere la foto.")
 );
 
 reader.onload = () => {
@@ -650,8 +685,8 @@ new Error(
 )
 );
 
-img.onload = () => {
-const maxSize = 600;
+img.onload = async () => {
+const maxSize = 800;
 const scale = Math.min(
 1,
 maxSize /
@@ -666,15 +701,12 @@ document.createElement("canvas");
 
 canvas.width = Math.max(
 1,
-Math.round(
-img.naturalWidth * scale
-)
+Math.round(img.naturalWidth * scale)
 );
+
 canvas.height = Math.max(
 1,
-Math.round(
-img.naturalHeight * scale
-)
+Math.round(img.naturalHeight * scale)
 );
 
 const ctx =
@@ -704,23 +736,51 @@ canvas.toDataURL(
 )
 );
 };
-img.src =
-String(reader.result);
+
+img.src = String(reader.result);
 };
+
 reader.readAsDataURL(file);
 }
 );
 
-// Salva la foto nel campo già previsto employees.photo_url.
-const { error } = await supabase
+// Usiamo lo stesso bucket Storage già funzionante per i documenti.
+// La foto viene salvata come file JPG, non come testo enorme nel database.
+const response = await fetch(dataUrl);
+const blob = await response.blob();
+
+const storagePath =
+`employee-photos/${employeeId}.jpg`;
+
+const {
+error: uploadError,
+} = await supabase.storage
+.from("payroll-documents")
+.upload(
+storagePath,
+blob,
+{
+upsert: true,
+contentType: "image/jpeg",
+cacheControl: "86400",
+}
+);
+
+if (uploadError) {
+throw uploadError;
+}
+
+const {
+error: updateError,
+} = await supabase
 .from("employees")
 .update({
-photo_url: dataUrl,
+photo_url: storagePath,
 })
 .eq("id", employeeId);
 
-if (error) {
-throw error;
+if (updateError) {
+throw updateError;
 }
 
 setMessage(
@@ -735,8 +795,10 @@ error
 );
 
 setMessage(
+`Errore caricamento foto: ${
 error?.message ||
-"Errore durante il caricamento della foto."
+"errore sconosciuto"
+}`
 );
 } finally {
 setPhotoUploading(false);
@@ -760,8 +822,21 @@ error: employeeError,
 .order("full_name");
 
 if (!employeeError) {
+const hydratedEmployees =
+await Promise.all(
+(employeeData || []).map(
+(employee) =>
+hydrateEmployeePhotoUrl(
+employee
+)
+)
+);
+
 setEmployees(
-employeeData || []
+hydratedEmployees.filter(
+(employee): employee is Employee =>
+Boolean(employee)
+)
 );
 }
 
