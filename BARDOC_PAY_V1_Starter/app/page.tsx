@@ -748,42 +748,19 @@ reader.readAsDataURL(file);
 }
 );
 
-// Usiamo lo stesso bucket Storage già funzionante per i documenti.
-// La foto viene salvata come file JPG, non come testo enorme nel database.
-const response = await fetch(dataUrl);
-const blob = await response.blob();
-
-// Usiamo lo stesso schema di percorso già utilizzato
-// per i documenti del dipendente: la cartella principale
-// è l'id del dipendente. In questo modo vengono rispettate
-// le policy Storage già funzionanti del progetto.
-const storagePath =
-`${employeeId}/profile.jpg`;
-
-const {
-error: uploadError,
-} = await supabase.storage
-.from("payroll-documents")
-.upload(
-storagePath,
-blob,
-{
-upsert: true,
-contentType: "image/jpeg",
-cacheControl: "86400",
-}
-);
-
-if (uploadError) {
-throw uploadError;
-}
-
+// IMPORTANTE:
+// il bucket "payroll-documents" accetta solo i MIME previsti per i PDF.
+// Per evitare l'errore "mime type image/jpeg is not supported" non
+// utilizziamo quel bucket per la foto. La foto viene invece salvata
+// direttamente nella colonna employees.photo_url come data URL JPEG
+// compressa. In questo modo rimane persistente anche dopo il refresh
+// e non richiede modifiche alle policy Storage.
 const {
 error: updateError,
 } = await supabase
 .from("employees")
 .update({
-photo_url: storagePath,
+photo_url: dataUrl,
 })
 .eq("id", employeeId);
 
@@ -792,7 +769,7 @@ throw updateError;
 }
 
 setMessage(
-"Foto del dipendente caricata correttamente. ✅"
+"Foto del dipendente salvata correttamente. ✅"
 );
 
 await loadAdminData();
@@ -810,6 +787,76 @@ error?.message ||
 );
 } finally {
 setPhotoUploading(false);
+}
+}
+
+/* =====================================================
+RIMOZIONE DOCUMENTO
+===================================================== */
+
+async function deleteDocument(documentId: string) {
+const doc = allDocuments.find(
+(item: Document) => item.id === documentId
+);
+
+if (!doc) {
+setMessage("Documento non trovato.");
+return;
+}
+
+const confirmed = window.confirm(
+`Vuoi eliminare definitivamente "${doc.file_name}"?`
+);
+
+if (!confirmed) return;
+
+setSubmitting(true);
+setMessage("");
+
+try {
+// Prima eliminiamo il file dallo Storage.
+if (doc.storage_path) {
+const { error: storageError } =
+await supabase.storage
+.from("payroll-documents")
+.remove([doc.storage_path]);
+
+if (storageError) {
+console.error(
+"Errore rimozione file Storage:",
+storageError
+);
+// Continuiamo comunque: il record DB va eliminato,
+// altrimenti il documento continuerebbe a comparire.
+}
+}
+
+// Poi eliminiamo il record dalla tabella documents.
+const { error: deleteError } =
+await supabase
+.from("documents")
+.delete()
+.eq("id", documentId);
+
+if (deleteError) {
+throw deleteError;
+}
+
+setMessage("Busta paga rimossa correttamente. ✅");
+await loadAdminData();
+} catch (error: any) {
+console.error(
+"Errore eliminazione documento:",
+error
+);
+
+setMessage(
+`Errore eliminazione documento: ${
+error?.message || "errore sconosciuto"
+}`
+);
+} finally {
+setSubmitting(false);
 }
 }
 
@@ -1576,6 +1623,9 @@ uploadDocument
 openDocument={
 openDocument
 }
+deleteDocument={
+deleteDocument
+}
 uploadEmployeePhoto={
 uploadEmployeePhoto
 }
@@ -1887,6 +1937,7 @@ submitting,
 message,
 uploadDocument,
 openDocument,
+deleteDocument,
 uploadEmployeePhoto,
 photoUploading,
 logout,
@@ -2502,7 +2553,7 @@ flexWrap: "wrap",
 <input
 id={`employee-photo-${selectedEmployeeData.id}`}
 type="file"
-accept="image/*"
+accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
 style={{
 display: "none",
 }}
@@ -3059,6 +3110,10 @@ allEmployees
 openDocument={
 openDocument
 }
+deleteDocument={
+deleteDocument
+}
+allowDeletePayslip
 />
 
 <DocumentList
@@ -3071,6 +3126,9 @@ allEmployees
 }
 openDocument={
 openDocument
+}
+deleteDocument={
+deleteDocument
 }
 />
 </>
@@ -5864,6 +5922,8 @@ title,
 documents,
 employees,
 openDocument,
+deleteDocument,
+allowDeletePayslip = false,
 }: any) {
 return (
 <div
@@ -5973,7 +6033,16 @@ marginTop:
 </div>
 </div>
 
+<div
+style={{
+display: "flex",
+gap: 8,
+alignItems: "center",
+flexWrap: "wrap",
+}}
+>
 <button
+type="button"
 onClick={() =>
 openDocument(
 doc
@@ -5987,6 +6056,24 @@ color:
 >
 Apri PDF
 </button>
+
+{allowDeletePayslip &&
+doc.document_type === "payslip" && (
+<button
+type="button"
+onClick={() =>
+deleteDocument(doc.id)
+}
+style={{
+...secondaryButton,
+color: "#ff6b6b",
+border: "1px solid #6d3434",
+}}
+>
+🗑 Rimuovi
+</button>
+)}
+</div>
 </div>
 );
 }
