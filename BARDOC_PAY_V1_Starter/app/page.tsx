@@ -534,6 +534,19 @@ useState("");
 const [file, setFile] =
 useState<File | null>(null);
 
+// Quando cambia la categoria, il tipo documento deve essere
+// automaticamente riallineato ai tipi disponibili in quella categoria.
+// Evita di lasciare, ad esempio, "payslip" selezionato quando si passa
+// a "Rapporto di lavoro", "Permessi e assenze", ecc.
+useEffect(() => {
+const options =
+(DOCUMENT_TYPES as any)[category] || [];
+
+if (!options.some((item: any) => item.value === documentType)) {
+setDocumentType(options[0]?.value || "");
+}
+}, [category, documentType]);
+
 /* =====================================================
 COMUNICAZIONI
 ===================================================== */
@@ -1376,6 +1389,11 @@ null,
 });
 
 if (documentError) {
+// Se il record DB non viene creato, eliminiamo anche il PDF
+// appena caricato per evitare file orfani nello Storage.
+await supabase.storage
+.from("payroll-documents")
+.remove([storagePath]);
 throw documentError;
 }
 
@@ -3523,11 +3541,15 @@ emp.full_name
 value={
 category
 }
-onChange={(e) =>
-setCategory(
-e.target.value
-)
-}
+onChange={(e) => {
+const nextCategory = e.target.value;
+setCategory(nextCategory);
+const options =
+(DOCUMENT_TYPES as any)[nextCategory] || [];
+setDocumentType(options[0]?.value || "");
+setTaxCode("");
+setExpiryDate("");
+}}
 style={
 darkSelect
 }
