@@ -796,7 +796,7 @@ try {
 const safeFileName =
 file.name
 .replace(
-/[^\w.\\- ]/g,
+/[^\w.\- ]/g,
 ""
 )
 .replace(
