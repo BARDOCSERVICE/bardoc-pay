@@ -486,7 +486,11 @@ employee: Employee | null
 ): Promise<Employee | null> {
 if (!employee?.photo_url) return employee;
 
-if (!employee.photo_url.startsWith("employee-photos/")) {
+const isStoragePhotoPath =
+employee.photo_url.startsWith(`${employee.id}/`) ||
+employee.photo_url.startsWith("employee-photos/");
+
+if (!isStoragePhotoPath) {
 return employee;
 }
 
@@ -749,8 +753,12 @@ reader.readAsDataURL(file);
 const response = await fetch(dataUrl);
 const blob = await response.blob();
 
+// Usiamo lo stesso schema di percorso già utilizzato
+// per i documenti del dipendente: la cartella principale
+// è l'id del dipendente. In questo modo vengono rispettate
+// le policy Storage già funzionanti del progetto.
 const storagePath =
-`employee-photos/${employeeId}.jpg`;
+`${employeeId}/profile.jpg`;
 
 const {
 error: uploadError,
