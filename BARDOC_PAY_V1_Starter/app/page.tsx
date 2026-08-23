@@ -75,8 +75,8 @@ const ADMIN_EMAIL = "bardocfg@gmail.com";
 const CURRENT_YEAR = new Date().getFullYear();
 
 const YEARS = Array.from(
-{ length: 8 },
-(_, i) => CURRENT_YEAR - 5 + i
+{ length: 16 },
+(_, i) => CURRENT_YEAR - 10 + i
 );
 
 const MONTHS = [
@@ -213,6 +213,162 @@ return new Intl.NumberFormat("it-IT", {
 style: "currency",
 currency: "EUR",
 }).format(value);
+}
+
+/* =========================================================
+ZIP BUSTE PAGA
+========================================================= */
+
+function crc32(bytes: Uint8Array) {
+let crc = 0xffffffff;
+for (let i = 0; i < bytes.length; i++) {
+crc ^= bytes[i];
+for (let j = 0; j < 8; j++) {
+crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+}
+}
+return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(view: DataView, offset: number, value: number) {
+view.setUint16(offset, value, true);
+}
+
+function writeUint32(view: DataView, offset: number, value: number) {
+view.setUint32(offset, value >>> 0, true);
+}
+
+function makeZipBlob(
+files: { name: string; bytes: Uint8Array }[]
+) {
+const encoder = new TextEncoder();
+const localParts: Uint8Array[] = [];
+const centralParts: Uint8Array[] = [];
+let offset = 0;
+
+for (const item of files) {
+const nameBytes = encoder.encode(item.name);
+const data = item.bytes;
+const crc = crc32(data);
+
+const localHeader = new ArrayBuffer(30);
+const localView = new DataView(localHeader);
+writeUint32(localView, 0, 0x04034b50);
+writeUint16(localView, 4, 20);
+writeUint16(localView, 6, 0x0800);
+writeUint16(localView, 8, 0);
+writeUint16(localView, 10, 0);
+writeUint16(localView, 12, 0);
+writeUint32(localView, 14, crc);
+writeUint32(localView, 18, data.length);
+writeUint32(localView, 22, data.length);
+writeUint16(localView, 26, nameBytes.length);
+writeUint16(localView, 28, 0);
+
+localParts.push(
+new Uint8Array(localHeader),
+nameBytes,
+data
+);
+
+const centralHeader = new ArrayBuffer(46);
+const centralView = new DataView(centralHeader);
+writeUint32(centralView, 0, 0x02014b50);
+writeUint16(centralView, 4, 20);
+writeUint16(centralView, 6, 20);
+writeUint16(centralView, 8, 0x0800);
+writeUint16(centralView, 10, 0);
+writeUint16(centralView, 12, 0);
+writeUint16(centralView, 14, 0);
+writeUint32(centralView, 16, crc);
+writeUint32(centralView, 20, data.length);
+writeUint32(centralView, 24, data.length);
+writeUint16(centralView, 28, nameBytes.length);
+writeUint16(centralView, 30, 0);
+writeUint16(centralView, 32, 0);
+writeUint16(centralView, 34, 0);
+writeUint16(centralView, 36, 0);
+writeUint32(centralView, 38, 0);
+writeUint32(centralView, 42, offset);
+
+centralParts.push(
+new Uint8Array(centralHeader),
+nameBytes
+);
+
+offset += 30 + nameBytes.length + data.length;
+}
+
+const centralOffset = offset;
+const centralSize = centralParts.reduce(
+(total, part) => total + part.length,
+0
+);
+
+const end = new ArrayBuffer(22);
+const endView = new DataView(end);
+writeUint32(endView, 0, 0x06054b50);
+writeUint16(endView, 4, 0);
+writeUint16(endView, 6, 0);
+writeUint16(endView, 8, files.length);
+writeUint16(endView, 10, files.length);
+writeUint32(endView, 12, centralSize);
+writeUint32(endView, 16, centralOffset);
+writeUint16(endView, 20, 0);
+
+return new Blob(
+[...localParts, ...centralParts, new Uint8Array(end)],
+{ type: "application/zip" }
+);
+}
+
+async function downloadPayslipsZip(
+files: Document[],
+year: number,
+employeeName: string
+) {
+if (!files.length) {
+throw new Error(`Nessuna busta paga presente per ${year}.`);
+}
+
+const downloaded: { name: string; bytes: Uint8Array }[] = [];
+
+for (const doc of files) {
+const { data, error } = await supabase.storage
+.from("payroll-documents")
+.createSignedUrl(doc.storage_path, 600);
+
+if (error || !data?.signedUrl) {
+throw new Error(`Impossibile recuperare ${doc.file_name}.`);
+}
+
+const response = await fetch(data.signedUrl);
+if (!response.ok) {
+throw new Error(`Impossibile scaricare ${doc.file_name}.`);
+}
+
+const buffer = await response.arrayBuffer();
+const monthLabel = doc.month
+? String(doc.month).padStart(2, "0")
+: "00";
+
+const safeName = doc.file_name.replace(/[^\w.\- ]/g, "").replace(/\s+/g, "_");
+
+downloaded.push({
+name: `${year}-${monthLabel}_${safeName}`,
+bytes: new Uint8Array(buffer),
+});
+}
+
+const zip = makeZipBlob(downloaded);
+const url = URL.createObjectURL(zip);
+const anchor = document.createElement("a");
+anchor.href = url;
+anchor.download = `Buste_paga_${employeeName.replace(/[^\w\- ]/g, "").replace(/\s+/g, "_")}_${year}.zip`;
+document.body.appendChild(anchor);
+anchor.click();
+anchor.remove();
+URL.revokeObjectURL(url);
 }
 
 /* =========================================================
@@ -556,7 +712,7 @@ const { data: docs } =
 await supabase
 .from("documents")
 .select("*")
-.eq("employee_id", emp.id)
+.eq("employee_id", emp.id)
 .order("year", {
 ascending: false,
 })
@@ -590,7 +746,7 @@ error: attendanceError,
 } = await supabase
 .from("attendance")
 .select("*")
-.eq("employee_id", emp.id)
+.eq("employee_id", emp.id)
 .order("year", {
 ascending: false,
 })
@@ -612,7 +768,7 @@ error: extraError,
 } = await supabase
 .from("extra_payments")
 .select("*")
-.eq("employee_id", emp.id)
+.eq("employee_id", emp.id)
 .order("year", {
 ascending: false,
 })
@@ -634,7 +790,7 @@ error: chatError,
 } = await supabase
 .from("chat_messages")
 .select("*")
-.eq("employee_id", emp.id)
+.eq("employee_id", emp.id)
 .order("created_at", {
 ascending: true,
 });
@@ -670,109 +826,148 @@ setPhotoUploading(true);
 setMessage("");
 
 try {
-const dataUrl = await new Promise<string>((resolve, reject) => {
 const reader = new FileReader();
 
+const dataUrl = await new Promise<string>(
+(resolve, reject) => {
 reader.onerror = () =>
-reject(new Error("Impossibile leggere la foto."));
+reject(
+new Error("Impossibile leggere la foto.")
+);
 
 reader.onload = () => {
 const img = new Image();
 
 img.onerror = () =>
-reject(new Error("Il file selezionato non è un'immagine valida."));
-
-img.onload = () => {
-try {
-const maxSize = 600;
-const scale = Math.min(
-1,
-maxSize / Math.max(img.naturalWidth, img.naturalHeight)
+reject(
+new Error(
+"Il file selezionato non è un'immagine valida."
+)
 );
 
-const canvas = document.createElement("canvas");
-canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
-canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+img.onload = async () => {
+const maxSize = 800;
+const scale = Math.min(
+1,
+maxSize /
+Math.max(
+img.naturalWidth,
+img.naturalHeight
+)
+);
 
-const ctx = canvas.getContext("2d");
+const canvas =
+document.createElement("canvas");
+
+canvas.width = Math.max(
+1,
+Math.round(img.naturalWidth * scale)
+);
+
+canvas.height = Math.max(
+1,
+Math.round(img.naturalHeight * scale)
+);
+
+const ctx =
+canvas.getContext("2d");
+
 if (!ctx) {
-reject(new Error("Impossibile elaborare la foto."));
+reject(
+new Error(
+"Impossibile elaborare la foto."
+)
+);
 return;
 }
 
-ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+ctx.drawImage(
+img,
+0,
+0,
+canvas.width,
+canvas.height
+);
 
-const compressed = canvas.toDataURL("image/jpeg", 0.72);
-
-if (!compressed || compressed.length < 20) {
-reject(new Error("Impossibile creare la foto compressa."));
-return;
-}
-
-resolve(compressed);
-} catch (e) {
-reject(e);
-}
+resolve(
+canvas.toDataURL(
+"image/jpeg",
+0.82
+)
+);
 };
 
 img.src = String(reader.result);
 };
 
 reader.readAsDataURL(file);
-});
+}
+);
 
-/*
- * La foto NON viene caricata nel bucket payroll-documents.
- * Quel bucket è destinato ai PDF e può rifiutare image/jpeg.
- * Salviamo invece la foto JPEG compressa nella colonna employees.photo_url.
- */
-const { data: updatedEmployee, error: updateError } = await supabase
+// IMPORTANTE:
+// il bucket "payroll-documents" accetta solo i MIME previsti per i PDF.
+// Per evitare l'errore "mime type image/jpeg is not supported" non
+// utilizziamo quel bucket per la foto. La foto viene invece salvata
+// direttamente nella colonna employees.photo_url come data URL JPEG
+// compressa. In questo modo rimane persistente anche dopo il refresh
+// e non richiede modifiche alle policy Storage.
+const {
+error: updateError,
+} = await supabase
 .from("employees")
-.update({ photo_url: dataUrl })
-.eq("id", employeeId)
-.select("*")
-.maybeSingle();
+.update({
+photo_url: dataUrl,
+})
+.eq("id", employeeId);
 
 if (updateError) {
+throw updateError;
+}
+
+// Verifica reale della persistenza nel database prima di aggiornare la UI.
+const {
+data: savedEmployee,
+error: verifyError,
+} = await supabase
+.from("employees")
+.select("id, photo_url")
+.eq("id", employeeId)
+.maybeSingle();
+
+if (verifyError) {
+throw verifyError;
+}
+
+if (!savedEmployee?.photo_url) {
 throw new Error(
-[
-updateError.message,
-updateError.details,
-updateError.hint,
-updateError.code,
-]
-.filter(Boolean)
-.join(" | ")
+"La foto è stata inviata ma non risulta salvata nel profilo del dipendente. Controlla la colonna photo_url e le policy RLS della tabella employees."
 );
 }
 
-if (!updatedEmployee) {
-throw new Error(
-"La foto è stata elaborata, ma il database non ha restituito il dipendente aggiornato. Controlla le policy UPDATE della tabella employees."
-);
-}
-
-/* Aggiornamento immediato dell'interfaccia: l'avatar cambia senza aspettare il refresh. */
-setEmployees((current) =>
-current.map((emp) =>
-emp.id === employeeId
-? { ...emp, ...updatedEmployee, photo_url: dataUrl }
-: emp
+setEmployees((prev) =>
+prev.map((item) =>
+item.id === employeeId
+? { ...item, photo_url: savedEmployee.photo_url }
+: item
 )
 );
 
-setMessage("Foto del dipendente salvata correttamente. ✅");
-} catch (error: any) {
-console.error("Errore caricamento foto dipendente:", error);
+setMessage(
+"Foto del dipendente salvata correttamente. ✅"
+);
 
-const errorText = error?.message || "errore sconosciuto";
+await loadAdminData();
+} catch (error: any) {
+console.error(
+"Errore caricamento foto dipendente:",
+error
+);
 
 setMessage(
-errorText.toLowerCase().includes("row-level security") ||
-errorText.toLowerCase().includes("permission") ||
-errorText.toLowerCase().includes("policy")
-? "Foto non salvata: Supabase sta bloccando l'aggiornamento della tabella employees. Devi applicare le policy SQL del file supabase_bardoc_pay_policies.sql. ⚠️"
-: `Errore caricamento foto: ${errorText}`
+`Errore caricamento foto: ${
+error?.message ||
+"errore sconosciuto"
+}`
 );
 } finally {
 setPhotoUploading(false);
@@ -794,9 +989,7 @@ return;
 }
 
 const confirmed = window.confirm(
-`Vuoi eliminare definitivamente la busta paga "${doc.file_name}"?
-
-Questa operazione non può essere annullata.`
+`Vuoi eliminare definitivamente "${doc.file_name}"?`
 );
 
 if (!confirmed) return;
@@ -805,52 +998,41 @@ setSubmitting(true);
 setMessage("");
 
 try {
-/*
- * Prima eliminiamo il record dal database.
- * È il passaggio fondamentale: così la busta sparisce dalla lista
- * anche se, per una policy Storage, il PDF non fosse eliminabile.
- */
-const { error: deleteError } = await supabase
+// Prima eliminiamo il file dallo Storage.
+if (doc.storage_path) {
+const { error: storageError } =
+await supabase.storage
+.from("payroll-documents")
+.remove([doc.storage_path]);
+
+if (storageError) {
+console.error(
+"Errore rimozione file Storage:",
+storageError
+);
+// Continuiamo comunque: il record DB va eliminato,
+// altrimenti il documento continuerebbe a comparire.
+}
+}
+
+// Poi eliminiamo il record dalla tabella documents.
+const { error: deleteError } =
+await supabase
 .from("documents")
 .delete()
 .eq("id", documentId);
 
 if (deleteError) {
-throw new Error(
-[
-deleteError.message,
-deleteError.details,
-deleteError.hint,
-deleteError.code,
-]
-.filter(Boolean)
-.join(" | ")
-);
-}
-
-/* Aggiornamento immediato della lista sullo schermo. */
-setAllDocuments((current) =>
-current.filter((item) => item.id !== documentId)
-);
-
-/*
- * Solo dopo aver eliminato il record DB proviamo a eliminare anche il PDF.
- * Se Storage non permette la rimozione, il documento non ricompare comunque
- * nel portale perché il record documents è già stato eliminato.
- */
-if (doc.storage_path) {
-const { error: storageError } = await supabase.storage
-.from("payroll-documents")
-.remove([doc.storage_path]);
-
-if (storageError) {
-console.warn("PDF eliminato dal database ma non dallo Storage:", storageError);
-}
+throw deleteError;
 }
 
 setMessage("Busta paga rimossa correttamente. ✅");
+await loadAdminData();
 } catch (error: any) {
-console.error("Errore eliminazione documento:", error);
+console.error(
+"Errore eliminazione documento:",
+error
+);
 
 setMessage(
 `Errore eliminazione documento: ${
@@ -1425,7 +1607,7 @@ doc,
 employee:
 employees.find(
 (emp) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 ),
 }))
@@ -1448,7 +1630,7 @@ doc,
 employee:
 employees.find(
 (emp) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 ),
 }))
@@ -3101,19 +3283,11 @@ text={message}
 )}
 </div>
 
-<PayrollArchiveAdmin
-documents={
-allDocuments
-}
-employees={
-allEmployees
-}
-openDocument={
-openDocument
-}
-deleteDocument={
-deleteDocument
-}
+<PayslipArchive
+employee={selectedEmployeeData}
+payslips={selectedEmployeePayslips}
+openDocument={openDocument}
+deleteDocument={deleteDocument}
 />
 
 <DocumentList
@@ -3678,7 +3852,7 @@ comm.is_general
 (
 emp: Employee
 ) =>
-emp.id ===
+emp.id ===
 comm.employee_id
 )
 ?.full_name ||
@@ -5913,732 +6087,272 @@ fontSize:
 );
 }
 
-
 /* =========================================================
-ARCHIVIO BUSTE PAGA AMMINISTRAZIONE
+ARCHIVIO BUSTE PAGA PER ANNO
 ========================================================= */
 
-const ZIP_CRC_TABLE = (() => {
-  const table = new Uint32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) {
-      c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
-    }
-    table[n] = c >>> 0;
-  }
-  return table;
-})();
-
-function crc32(bytes: Uint8Array) {
-  let crc = 0xffffffff;
-  for (let i = 0; i < bytes.length; i++) {
-    crc =
-      ZIP_CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^
-      (crc >>> 8);
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-function zipU16(value: number) {
-  return new Uint8Array([
-    value & 0xff,
-    (value >>> 8) & 0xff,
-  ]);
-}
-
-function zipU32(value: number) {
-  return new Uint8Array([
-    value & 0xff,
-    (value >>> 8) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 24) & 0xff,
-  ]);
-}
-
-function concatZipParts(parts: Uint8Array[]) {
-  const total = parts.reduce(
-    (sum, part) => sum + part.length,
-    0
-  );
-
-  const result = new Uint8Array(total);
-  let offset = 0;
-
-  for (const part of parts) {
-    result.set(part, offset);
-    offset += part.length;
-  }
-
-  return result;
-}
-
-function buildStoredZip(
-  files: Array<{
-    name: string;
-    bytes: Uint8Array;
-  }>
-) {
-  const localParts: Uint8Array[] = [];
-  const centralParts: Uint8Array[] = [];
-  let offset = 0;
-
-  for (const file of files) {
-    const nameBytes = new TextEncoder().encode(file.name);
-    const data = file.bytes;
-    const crc = crc32(data);
-
-    const localHeader = concatZipParts([
-      zipU32(0x04034b50),
-      zipU16(20),
-      zipU16(0),
-      zipU16(0),
-      zipU16(0),
-      zipU16(0),
-      zipU32(crc),
-      zipU32(data.length),
-      zipU32(data.length),
-      zipU16(nameBytes.length),
-      zipU16(0),
-      nameBytes,
-      data,
-    ]);
-
-    localParts.push(localHeader);
-
-    const centralHeader = concatZipParts([
-      zipU32(0x02014b50),
-      zipU16(20),
-      zipU16(20),
-      zipU16(0),
-      zipU16(0),
-      zipU16(0),
-      zipU32(crc),
-      zipU32(data.length),
-      zipU32(data.length),
-      zipU16(nameBytes.length),
-      zipU16(0),
-      zipU16(0),
-      zipU16(0),
-      zipU16(0),
-      zipU32(0),
-      zipU32(offset),
-      nameBytes,
-    ]);
-
-    centralParts.push(centralHeader);
-    offset += localHeader.length;
-  }
-
-  const localData = concatZipParts(localParts);
-  const centralData = concatZipParts(centralParts);
-  const end = concatZipParts([
-    zipU32(0x06054b50),
-    zipU16(0),
-    zipU16(0),
-    zipU16(files.length),
-    zipU16(files.length),
-    zipU32(centralData.length),
-    zipU32(localData.length),
-    zipU16(0),
-  ]);
-
-  return concatZipParts([
-    localData,
-    centralData,
-    end,
-  ]);
-}
-
-function PayrollArchiveAdmin({
-  documents,
-  employees,
-  openDocument,
-  deleteDocument,
+function PayslipArchive({
+employee,
+payslips,
+openDocument,
+deleteDocument,
 }: {
-  documents: Document[];
-  employees: Employee[];
-  openDocument: (doc: Document) => void;
-  deleteDocument: (id: string) => void;
+employee: Employee | null;
+payslips: Document[];
+openDocument: (doc: Document) => void;
+deleteDocument: (id: string) => void;
 }) {
-  const [openYears, setOpenYears] =
-    useState<Record<number, boolean>>({});
+const [openYears, setOpenYears] = useState<Record<number, boolean>>({});
+const [zipYear, setZipYear] = useState<number | null>(null);
+const [archiveMessage, setArchiveMessage] = useState("");
 
-  const [downloadingYear, setDownloadingYear] =
-    useState<number | null>(null);
+const years = useMemo(() => {
+return Array.from(
+new Set(payslips.map((doc) => doc.year))
+).sort((a, b) => b - a);
+}, [payslips]);
 
-  const [archiveMessage, setArchiveMessage] =
-    useState("");
+async function handleZip(year: number, docs: Document[]) {
+try {
+setZipYear(year);
+setArchiveMessage("");
+await downloadPayslipsZip(
+ docs,
+ year,
+ employee?.full_name || "dipendente"
+);
+setArchiveMessage(`Archivio ${year} scaricato correttamente. ✅`);
+} catch (error: any) {
+console.error(error);
+setArchiveMessage(
+error?.message ||
+`Errore durante la creazione dello ZIP ${year}.`
+);
+} finally {
+setZipYear(null);
+}
+}
 
-  const payslips = useMemo(
-    () =>
-      documents
-        .filter(
-          (doc) =>
-            doc.document_type === "payslip"
-        )
-        .sort(
-          (a, b) =>
-            b.year - a.year ||
-            (b.month || 0) -
-              (a.month || 0) ||
-            a.file_name.localeCompare(
-              b.file_name
-            )
-        ),
-    [documents]
-  );
+if (!employee) {
+return (
+<div
+style={{
+background: "#172630",
+border: "1px solid #293c47",
+borderRadius: 16,
+padding: 22,
+marginTop: 20,
+}}
+>
+<h3 style={{ marginTop: 0 }}>Archivio buste paga</h3>
+<div style={{ color: "#81919a" }}>
+Seleziona prima un dipendente per visualizzare l'archivio annuale.
+</div>
+</div>
+);
+}
 
-  const years = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          payslips.map((doc) => doc.year)
-        )
-      ).sort((a, b) => b - a),
-    [payslips]
-  );
+return (
+<div
+style={{
+background: "#172630",
+border: "1px solid #293c47",
+borderRadius: 16,
+padding: 22,
+marginTop: 20,
+}}
+>
+<div
+style={{
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+gap: 15,
+flexWrap: "wrap",
+}}
+>
+<div>
+<h3 style={{ margin: "0 0 5px" }}>📚 Archivio buste paga</h3>
+<div style={{ color: "#81919a", fontSize: 12 }}>
+{employee.full_name} · Anni separati e mesi ordinati da gennaio a dicembre.
+</div>
+</div>
+</div>
 
-  async function downloadYearZip(year: number) {
-    const yearDocs = payslips.filter(
-      (doc) => doc.year === year
-    );
+{archiveMessage && (
+<div
+style={{
+marginTop: 12,
+padding: 10,
+borderRadius: 9,
+background: "#12342d",
+color: "#b9f3de",
+fontSize: 12,
+}}
+>
+{archiveMessage}
+</div>
+)}
 
-    if (yearDocs.length === 0) return;
+{years.length === 0 ? (
+<div style={{ color: "#81919a", marginTop: 16 }}>
+Nessuna busta paga presente per questo dipendente.
+</div>
+) : (
+years.map((year) => {
+const yearDocs = payslips
+.filter((doc) => doc.year === year)
+.sort((a, b) => (a.month || 99) - (b.month || 99));
+const isOpen = !!openYears[year];
 
-    setDownloadingYear(year);
-    setArchiveMessage("");
+return (
+<div
+key={year}
+style={{
+border: "1px solid #2c414b",
+borderRadius: 14,
+marginTop: 12,
+overflow: "hidden",
+}}
+>
+<div
+style={{
+display: "flex",
+alignItems: "center",
+gap: 10,
+background: isOpen ? "#12342d" : "#101e28",
+padding: 12,
+}}
+>
+<button
+type="button"
+onClick={() =>
+setOpenYears((prev) => ({ ...prev, [year]: !prev[year] }))
+}
+style={{
+flex: 1,
+border: "none",
+background: "transparent",
+color: "#fff",
+padding: "7px 8px",
+textAlign: "left",
+cursor: "pointer",
+fontWeight: 900,
+fontSize: 16,
+}}
+>
+📅 Anno {year} · {yearDocs.length} {yearDocs.length === 1 ? "busta" : "buste"}
+<span style={{ color: "#16c784", marginLeft: 10 }}>
+{isOpen ? "−" : "+"}
+</span>
+</button>
 
-    try {
-      const files: Array<{
-        name: string;
-        bytes: Uint8Array;
-      }> = [];
+<button
+type="button"
+onClick={() => handleZip(year, yearDocs)}
+disabled={zipYear === year}
+style={{
+...secondaryButton,
+color: "#16c784",
+opacity: zipYear === year ? 0.6 : 1,
+whiteSpace: "nowrap",
+}}
+>
+{zipYear === year ? "CREAZIONE ZIP..." : "⬇ Scarica anno ZIP"}
+</button>
+</div>
 
-      for (const doc of yearDocs) {
-        const {
-          data,
-          error,
-        } = await supabase.storage
-          .from("payroll-documents")
-          .createSignedUrl(
-            doc.storage_path,
-            300
-          );
+{isOpen && (
+<div style={{ padding: 12 }}>
+{MONTHS.map((monthName, index) => {
+const monthNumber = index + 1;
+const monthDocs = yearDocs.filter(
+(doc) => doc.month === monthNumber
+);
 
-        if (
-          error ||
-          !data?.signedUrl
-        ) {
-          throw new Error(
-            `Impossibile creare il link per "${doc.file_name}".`
-          );
-        }
+return (
+<div
+key={`${year}-${monthNumber}`}
+style={{
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+gap: 12,
+flexWrap: "wrap",
+padding: "12px 14px",
+borderBottom: index === 11 ? "none" : "1px solid #243943",
+background: monthDocs.length ? "#101e28" : "#0c171e",
+}}
+>
+<div>
+<strong>{monthName}</strong>
+<div
+style={{
+color: monthDocs.length ? "#16c784" : "#667780",
+fontSize: 11,
+marginTop: 4,
+}}
+>
+{monthDocs.length
+? `${monthDocs.length} busta${monthDocs.length > 1 ? "e" : ""} presente${monthDocs.length > 1 ? "i" : ""}`
+: "Nessuna busta paga caricata"}
+</div>
+</div>
 
-        const response = await fetch(
-          data.signedUrl
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            `Impossibile scaricare "${doc.file_name}".`
-          );
-        }
-
-        const bytes = new Uint8Array(
-          await response.arrayBuffer()
-        );
-
-        const employee =
-          employees.find(
-            (emp) =>
-              emp.id === doc.employee_id
-          );
-
-        const safeEmployee =
-          (
-            employee?.full_name ||
-            "Dipendente"
-          )
-            .replace(
-              /[^\wÀ-ÿ\- ]/g,
-              ""
-            )
-            .trim()
-            .replace(/\s+/g, "_");
-
-        const monthName =
-          doc.month &&
-          doc.month >= 1 &&
-          doc.month <= 12
-            ? MONTHS[doc.month - 1]
-            : "Senza_mese";
-
-        files.push({
-          name:
-            `${safeEmployee}/${String(
-              doc.month || 0
-            ).padStart(2, "0")}_${monthName}_${doc.file_name}`,
-          bytes,
-        });
-      }
-
-      const zipBytes =
-        buildStoredZip(files);
-
-      const blob = new Blob(
-        [zipBytes],
-        {
-          type:
-            "application/zip",
-        }
-      );
-
-      const url =
-        URL.createObjectURL(blob);
-
-      const link =
-        document.createElement("a");
-
-      link.href = url;
-      link.download =
-        `Buste_paga_${year}.zip`;
-
-      document.body.appendChild(
-        link
-      );
-
-      link.click();
-      link.remove();
-
-      URL.revokeObjectURL(url);
-
-      setArchiveMessage(
-        `Archivio ${year} scaricato correttamente. ✅`
-      );
-    } catch (error: any) {
-      console.error(
-        "Errore creazione archivio ZIP:",
-        error
-      );
-
-      setArchiveMessage(
-        error?.message ||
-          `Errore durante la creazione dello ZIP ${year}.`
-      );
-    } finally {
-      setDownloadingYear(null);
-    }
-  }
-
-  return (
-    <div
-      style={{
-        background: "#172630",
-        border:
-          "1px solid #293c47",
-        borderRadius: 16,
-        padding: 22,
-        marginTop: 20,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent:
-            "space-between",
-          alignItems: "center",
-          gap: 15,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <h3
-            style={{
-              margin:
-                "0 0 5px",
-            }}
-          >
-            Buste paga caricate
-          </h3>
-
-          <div
-            style={{
-              color:
-                "#81919a",
-              fontSize: 13,
-            }}
-          >
-            Archivio organizzato per
-            anno e mese.
-          </div>
-        </div>
-      </div>
-
-      {archiveMessage && (
-        <Message
-          text={
-            archiveMessage
-          }
-        />
-      )}
-
-      {years.length === 0 ? (
-        <div
-          style={{
-            color:
-              "#81919a",
-            marginTop: 18,
-          }}
-        >
-          Nessuna busta paga
-          presente.
-        </div>
-      ) : (
-        <div
-          style={{
-            marginTop: 18,
-          }}
-        >
-          {years.map((year) => {
-            const yearDocs =
-              payslips.filter(
-                (doc) =>
-                  doc.year === year
-              );
-
-            const yearOpen =
-              !!openYears[year];
-
-            return (
-              <div
-                key={year}
-                style={{
-                  border:
-                    "1px solid #2c414b",
-                  borderRadius: 14,
-                  marginBottom: 12,
-                  overflow:
-                    "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems:
-                      "center",
-                    gap: 10,
-                    background:
-                      yearOpen
-                        ? "#12342d"
-                        : "#101e28",
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setOpenYears(
-                        (prev) => ({
-                          ...prev,
-                          [year]:
-                            !prev[year],
-                        })
-                      )
-                    }
-                    style={{
-                      flex: 1,
-                      border: "none",
-                      background:
-                        "transparent",
-                      color: "#fff",
-                      padding:
-                        "17px 18px",
-                      display: "flex",
-                      justifyContent:
-                        "space-between",
-                      alignItems:
-                        "center",
-                      cursor:
-                        "pointer",
-                      fontWeight: 900,
-                      fontSize: 16,
-                      textAlign: "left",
-                    }}
-                  >
-                    <span>
-                      📅 Anno {year}
-                      <span
-                        style={{
-                          color:
-                            "#81919a",
-                          fontSize: 12,
-                          marginLeft: 8,
-                          fontWeight: 600,
-                        }}
-                      >
-                        ({yearDocs.length}{" "}
-                        {yearDocs.length ===
-                        1
-                          ? "busta"
-                          : "buste"})
-                      </span>
-                    </span>
-
-                    <span
-                      style={{
-                        color:
-                          "#16c784",
-                        fontSize: 22,
-                      }}
-                    >
-                      {yearOpen
-                        ? "−"
-                        : "+"}
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      downloadYearZip(
-                        year
-                      )
-                    }
-                    disabled={
-                      downloadingYear ===
-                      year
-                    }
-                    style={{
-                      marginRight: 12,
-                      padding:
-                        "9px 12px",
-                      border:
-                        "1px solid #16c784",
-                      borderRadius: 9,
-                      background:
-                        "#10231f",
-                      color:
-                        "#16c784",
-                      fontWeight: 900,
-                      cursor:
-                        downloadingYear ===
-                        year
-                          ? "wait"
-                          : "pointer",
-                      whiteSpace:
-                        "nowrap",
-                    }}
-                  >
-                    {downloadingYear ===
-                    year
-                      ? "CREAZIONE ZIP..."
-                      : `⬇ SCARICA ${year} (.ZIP)`}
-                  </button>
-                </div>
-
-                {yearOpen && (
-                  <div
-                    style={{
-                      padding: 12,
-                    }}
-                  >
-                    {MONTHS.map(
-                      (
-                        monthName,
-                        index
-                      ) => {
-                        const monthNumber =
-                          index + 1;
-
-                        const monthDocs =
-                          yearDocs.filter(
-                            (doc) =>
-                              doc.month ===
-                              monthNumber
-                          );
-
-                        return (
-                          <div
-                            key={
-                              monthNumber
-                            }
-                            style={{
-                              border:
-                                "1px solid #2a3d46",
-                              borderRadius:
-                                12,
-                              marginBottom:
-                                9,
-                              overflow:
-                                "hidden",
-                            }}
-                          >
-                            <div
-                              style={{
-                                padding:
-                                  "12px 14px",
-                                background:
-                                  "#101e28",
-                                color:
-                                  "#dce6e9",
-                                fontWeight:
-                                  800,
-                                display:
-                                  "flex",
-                                justifyContent:
-                                  "space-between",
-                                alignItems:
-                                  "center",
-                              }}
-                            >
-                              <span>
-                                {monthName}
-                              </span>
-
-                              <span
-                                style={{
-                                  color:
-                                    monthDocs.length
-                                      ? "#16c784"
-                                      : "#81919a",
-                                  fontSize:
-                                    12,
-                                }}
-                              >
-                                {monthDocs.length
-                                  ? `${monthDocs.length} busta${monthDocs.length === 1 ? "" : "e"}`
-                                  : "Nessuna busta"}
-                              </span>
-                            </div>
-
-                            {monthDocs.map(
-                              (doc) => {
-                                const employee =
-                                  employees.find(
-                                    (emp) =>
-                                      emp.id ===
-                                      doc.employee_id
-                                  );
-
-                                return (
-                                  <div
-                                    key={
-                                      doc.id
-                                    }
-                                    style={{
-                                      padding:
-                                        "14px",
-                                      borderTop:
-                                        "1px solid #293c47",
-                                      display:
-                                        "flex",
-                                      justifyContent:
-                                        "space-between",
-                                      alignItems:
-                                        "center",
-                                      gap: 15,
-                                      flexWrap:
-                                        "wrap",
-                                    }}
-                                  >
-                                    <div>
-                                      <strong>
-                                        {employee?.full_name ||
-                                          "Dipendente"}
-                                      </strong>
-
-                                      <div
-                                        style={{
-                                          color:
-                                            "#16c784",
-                                          fontSize:
-                                            12,
-                                          marginTop:
-                                            4,
-                                        }}
-                                      >
-                                        Busta paga
-                                      </div>
-
-                                      <div
-                                        style={{
-                                          color:
-                                            "#81919a",
-                                          fontSize:
-                                            12,
-                                          marginTop:
-                                            4,
-                                        }}
-                                      >
-                                        {doc.file_name}
-                                        {" · "}
-                                        {monthName}{" "}
-                                        {year}
-                                      </div>
-                                    </div>
-
-                                    <div
-                                      style={{
-                                        display:
-                                          "flex",
-                                        gap: 8,
-                                        alignItems:
-                                          "center",
-                                        flexWrap:
-                                          "wrap",
-                                      }}
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          openDocument(
-                                            doc
-                                          )
-                                        }
-                                        style={{
-                                          ...secondaryButton,
-                                          color:
-                                            "#16c784",
-                                        }}
-                                      >
-                                        Apri PDF
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          deleteDocument(
-                                            doc.id
-                                          )
-                                        }
-                                        style={{
-                                          ...secondaryButton,
-                                          color:
-                                            "#ff6b6b",
-                                          border:
-                                            "1px solid #6d3434",
-                                        }}
-                                      >
-                                        🗑 ELIMINA BUSTA PAGA
-                                      </button>
-                                    </div>
-                                  </div>
-                                );
-                              }
-                            )}
-                          </div>
-                        );
-                      }
-                    )}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
+<div
+style={{
+display: "flex",
+gap: 8,
+flexWrap: "wrap",
+}}
+>
+{monthDocs.map((doc) => (
+<div
+key={doc.id}
+style={{
+display: "flex",
+gap: 8,
+flexWrap: "wrap",
+alignItems: "center",
+}}
+>
+<button
+type="button"
+onClick={() => openDocument(doc)}
+style={{
+...secondaryButton,
+color: "#16c784",
+padding: "8px 12px",
+}}
+>
+Apri PDF
+</button>
+<button
+type="button"
+onClick={() => deleteDocument(doc.id)}
+style={{
+...secondaryButton,
+color: "#ff6b6b",
+border: "1px solid #6d3434",
+padding: "8px 12px",
+}}
+>
+🗑 Elimina
+</button>
+</div>
+))}
+</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+})
+)}
+</div>
+);
 }
 
 /* =========================================================
@@ -6697,7 +6411,7 @@ employees.find(
 (
 emp: Employee
 ) =>
-emp.id ===
+emp.id ===
 doc.employee_id
 );
 
@@ -6756,7 +6470,7 @@ marginTop:
 >
 {doc.file_name}
 {doc.month
-? ` · ${doc.month}/${doc.year}`
+? ` · ${MONTHS[doc.month - 1] || doc.month} ${doc.year}`
 : ` · ${doc.year}`}
 </div>
 </div>
@@ -6785,7 +6499,8 @@ color:
 Apri PDF
 </button>
 
-{allowDeletePayslip && (
+{allowDeletePayslip &&
+doc.document_type === "payslip" && (
 <button
 type="button"
 onClick={() =>
@@ -6797,7 +6512,7 @@ color: "#ff6b6b",
 border: "1px solid #6d3434",
 }}
 >
-🗑 ELIMINA BUSTA PAGA
+🗑 Rimuovi
 </button>
 )}
 </div>
