@@ -4335,6 +4335,22 @@ INVIA
 )}
 
 
+<div
+style={{
+marginTop:
+20,
+padding:
+16,
+background:
+"#13222c",
+borderRadius:
+12,
+color:
+"#81919a",
+fontSize:
+12,
+}}
+>
 Accesso effettuato come{" "}
 <strong
 style={{
