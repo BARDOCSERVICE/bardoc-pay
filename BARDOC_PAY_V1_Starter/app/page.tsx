@@ -3109,6 +3109,13 @@ useState<Record<string, boolean>>(
 {}
 );
 
+const [contactOpen, setContactOpen] = useState(false);
+
+async function handleContactSend() {
+await sendChatMessage();
+setContactOpen(false);
+}
+
 const generalCommunications =
 communications.filter(
 (item: Communication) =>
@@ -4150,26 +4157,6 @@ Apri PDF
 
 <div
 style={{
-marginTop:
-20,
-padding:
-16,
-background:
-"#13222c",
-borderRadius:
-12,
-color:
-"#81919a",
-fontSize:
-12,
-}}
->
-{/* =================================================
-CHAT
-================================================= */}
-
-<div
-style={{
 background:
 "#172630",
 border:
@@ -4185,7 +4172,7 @@ marginBottom:
 <h2
 style={{
 margin:
-"0 0 5px",
+"0 0 8px",
 }}
 >
 💬 Contatta l'amministrazione
@@ -4201,157 +4188,90 @@ fontSize:
 13,
 }}
 >
-Puoi scrivere direttamente all'amministrazione.
-I messaggi resteranno registrati nello storico.
+Hai bisogno di assistenza? Premi il pulsante qui sotto per inviare un messaggio.
 </p>
 
-<div
+<button
+onClick={() => setContactOpen(true)}
 style={{
-background:
-"#0e1b24",
-border:
-"1px solid #263b45",
-borderRadius:
-14,
-padding:
-16,
-minHeight:
-250,
-maxHeight:
-450,
-overflowY:
-"auto",
+...greenButton,
 }}
 >
-{chatMessages.length ===
-0 ? (
-<div
-style={{
-textAlign:
-"center",
-color:
-"#71828c",
-padding:
-"80px 20px",
-}}
->
-Nessun messaggio.
-<br />
-Scrivi il primo messaggio all'amministrazione.
+CONTATTA L'AMMINISTRAZIONE
+</button>
 </div>
-) : (
-chatMessages.map(
-(
-chat: ChatMessage
-) => {
-const mine =
-chat.sender_role ===
-"employee";
 
-return (
+{contactOpen && (
 <div
-key={
-chat.id
-}
+style={{
+position:
+"fixed",
+inset:
+0,
+background:
+"rgba(0,0,0,.72)",
+display:
+"flex",
+alignItems:
+"center",
+justifyContent:
+"center",
+zIndex:
+9999,
+padding:
+20,
+}}
+>
+<div
+style={{
+width:
+"100%",
+maxWidth:
+520,
+background:
+"#172630",
+border:
+"1px solid #344955",
+borderRadius:
+20,
+padding:
+24,
+boxSizing:
+"border-box",
+boxShadow:
+"0 20px 60px rgba(0,0,0,.45)",
+}}
+>
+<div
 style={{
 display:
 "flex",
 justifyContent:
-mine
-? "flex-end"
-: "flex-start",
+"space-between",
+alignItems:
+"center",
 marginBottom:
-12,
+16,
 }}
 >
-<div
+<h2 style={{ margin: 0 }}>
+Contatta l'amministrazione
+</h2>
+
+<button
+onClick={() => setContactOpen(false)}
 style={{
-maxWidth:
-"78%",
-background:
-mine
-? "#123f34"
-: "#263842",
-border:
-mine
-? "1px solid #1c6755"
-: "1px solid #364b55",
-borderRadius:
-mine
-? "16px 16px 4px 16px"
-: "16px 16px 16px 4px",
+...secondaryButton,
 padding:
-"11px 14px",
-}}
->
-<div
-style={{
+"7px 11px",
 fontSize:
-11,
-color:
-mine
-? "#16c784"
-: "#9db0b8",
-fontWeight:
-800,
-marginBottom:
-5,
+18,
 }}
 >
-{mine
-? "TU"
-: "AMMINISTRAZIONE"}
+×
+</button>
 </div>
 
-<div
-style={{
-whiteSpace:
-"pre-wrap",
-lineHeight:
-1.5,
-color:
-"#e1e9eb",
-}}
->
-{
-chat.message
-}
-</div>
-
-<div
-style={{
-fontSize:
-10,
-color:
-"#70828a",
-marginTop:
-6,
-textAlign:
-"right",
-}}
->
-{formatCommunicationDate(
-chat.created_at
-)}
-</div>
-</div>
-</div>
-);
-}
-)
-)}
-</div>
-
-<div
-style={{
-display:
-"flex",
-gap:
-10,
-marginTop:
-14,
-}}
->
 <textarea
 value={
 chatInput
@@ -4361,36 +4281,58 @@ setChatInput(
 e.target.value
 )
 }
-placeholder="Scrivi un messaggio all'amministrazione..."
-rows={3}
+placeholder="Scrivi il tuo messaggio..."
+rows={6}
+autoFocus
 style={{
 ...darkInput,
 resize:
 "vertical",
 fontFamily:
 "Arial, sans-serif",
+marginBottom:
+16,
 }}
 />
 
+<div
+style={{
+display:
+"flex",
+gap:
+10,
+}}
+>
+<button
+onClick={() => setContactOpen(false)}
+style={{
+...secondaryButton,
+flex:
+1,
+}}
+>
+ANNULLA
+</button>
+
 <button
 onClick={
-sendChatMessage
+handleContactSend
 }
 disabled={
 !chatInput.trim()
 }
 style={{
 ...greenButton,
-width:
-160,
-alignSelf:
-"stretch",
+flex:
+1,
 }}
 >
 INVIA
 </button>
 </div>
 </div>
+</div>
+)}
 
 
 Accesso effettuato come{" "}
