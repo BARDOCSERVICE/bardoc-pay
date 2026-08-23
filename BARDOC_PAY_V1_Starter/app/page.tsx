@@ -66,6 +66,114 @@ amount: number;
 description: string | null;
 };
 
+
+/* =========================================================
+ZIP BUSTE PAGA - nessuna libreria esterna richiesta
+Crea un archivio ZIP compatibile con WinZip/Esplora file.
+========================================================= */
+
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeU16(view: DataView, offset: number, value: number) {
+  view.setUint16(offset, value, true);
+}
+
+function writeU32(view: DataView, offset: number, value: number) {
+  view.setUint32(offset, value >>> 0, true);
+}
+
+function concatBytes(parts: Uint8Array[]): Uint8Array {
+  const total = parts.reduce((sum, part) => sum + part.length, 0);
+  const result = new Uint8Array(total);
+  let offset = 0;
+  for (const part of parts) {
+    result.set(part, offset);
+    offset += part.length;
+  }
+  return result;
+}
+
+function buildZip(
+  files: Array<{ name: string; data: Uint8Array }>
+): Blob {
+  const encoder = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const name = encoder.encode(file.name);
+    const data = file.data;
+    const crc = crc32(data);
+
+    const local = new Uint8Array(30 + name.length);
+    const lv = new DataView(local.buffer);
+    writeU32(lv, 0, 0x04034b50);
+    writeU16(lv, 4, 20);
+    writeU16(lv, 6, 0x0800); // UTF-8 filename
+    writeU16(lv, 8, 0); // store/no compression
+    writeU16(lv, 10, 0);
+    writeU16(lv, 12, 0);
+    writeU32(lv, 14, crc);
+    writeU32(lv, 18, data.length);
+    writeU32(lv, 22, data.length);
+    writeU16(lv, 26, name.length);
+    writeU16(lv, 28, 0);
+    local.set(name, 30);
+    localParts.push(local, data);
+
+    const central = new Uint8Array(46 + name.length);
+    const cv = new DataView(central.buffer);
+    writeU32(cv, 0, 0x02014b50);
+    writeU16(cv, 4, 20);
+    writeU16(cv, 6, 20);
+    writeU16(cv, 8, 0x0800);
+    writeU16(cv, 10, 0);
+    writeU16(cv, 12, 0);
+    writeU16(cv, 14, 0);
+    writeU32(cv, 16, crc);
+    writeU32(cv, 20, data.length);
+    writeU32(cv, 24, data.length);
+    writeU16(cv, 28, name.length);
+    writeU16(cv, 30, 0);
+    writeU16(cv, 32, 0);
+    writeU16(cv, 34, 0);
+    writeU16(cv, 36, 0);
+    writeU32(cv, 38, 0);
+    writeU32(cv, 42, offset);
+    central.set(name, 46);
+    centralParts.push(central);
+
+    offset += local.length + data.length;
+  }
+
+  const localData = concatBytes(localParts);
+  const centralData = concatBytes(centralParts);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  writeU32(ev, 0, 0x06054b50);
+  writeU16(ev, 4, 0);
+  writeU16(ev, 6, 0);
+  writeU16(ev, 8, files.length);
+  writeU16(ev, 10, files.length);
+  writeU32(ev, 12, centralData.length);
+  writeU32(ev, 16, localData.length);
+  writeU16(ev, 20, 0);
+
+  return new Blob([localData, centralData, end], {
+    type: "application/zip",
+  });
+}
+
 /* =========================================================
 CONFIGURAZIONE
 ========================================================= */
@@ -950,6 +1058,92 @@ setAdminChatMessages([]);
 }
 
 setAdminLoading(false);
+}
+
+
+/* =====================================================
+DOWNLOAD ZIP BUSTE PAGA DI UN ANNO
+===================================================== */
+
+async function downloadPayslipsZip(yearToDownload: number) {
+  const yearDocs = allDocuments.filter(
+    (doc: Document) =>
+      doc.document_type === "payslip" &&
+      doc.year === yearToDownload
+  );
+
+  if (yearDocs.length === 0) {
+    setMessage(`Nessuna busta paga disponibile per l'anno ${yearToDownload}.`);
+    return;
+  }
+
+  setSubmitting(true);
+  setMessage(`Preparazione ZIP buste paga ${yearToDownload}...`);
+
+  try {
+    const files: Array<{ name: string; data: Uint8Array }> = [];
+
+    for (const doc of yearDocs) {
+      const { data: signedData, error: signedError } =
+        await supabase.storage
+          .from("payroll-documents")
+          .createSignedUrl(doc.storage_path, 600);
+
+      if (signedError || !signedData?.signedUrl) {
+        throw new Error(
+          `Impossibile ottenere il PDF: ${doc.file_name}`
+        );
+      }
+
+      const response = await fetch(signedData.signedUrl);
+      if (!response.ok) {
+        throw new Error(
+          `Impossibile scaricare il PDF: ${doc.file_name}`
+        );
+      }
+
+      const buffer = await response.arrayBuffer();
+      const employee = allEmployees.find(
+        (emp: Employee) => emp.id === doc.employee_id
+      );
+      const employeeName =
+        employee?.full_name
+          ?.replace(/[^a-zA-Z0-9À-ÿ _-]/g, "")
+          .trim()
+          .replace(/\s+/g, "_") || "Dipendente";
+      const monthName = doc.month
+        ? MONTHS[doc.month - 1] || `Mese_${doc.month}`
+        : "Mese_non_indicato";
+      const safeFileName = doc.file_name.replace(/[\\/:*?"<>|]/g, "_");
+
+      files.push({
+        name: `${monthName}_${employeeName}_${safeFileName}`,
+        data: new Uint8Array(buffer),
+      });
+    }
+
+    const zip = buildZip(files);
+    const url = URL.createObjectURL(zip);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `Buste_paga_${yearToDownload}.zip`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+
+    setMessage(
+      `ZIP dell'anno ${yearToDownload} creato correttamente. ✅`
+    );
+  } catch (error: any) {
+    console.error("Errore creazione ZIP buste paga:", error);
+    setMessage(
+      error?.message ||
+        "Impossibile creare lo ZIP delle buste paga."
+    );
+  } finally {
+    setSubmitting(false);
+  }
 }
 
 /* =====================================================
@@ -3101,21 +3295,12 @@ text={message}
 )}
 </div>
 
-<DocumentList
-title="Buste paga caricate"
-documents={
-payslips
-}
-employees={
-allEmployees
-}
-openDocument={
-openDocument
-}
-deleteDocument={
-deleteDocument
-}
-allowDeletePayslip
+<PayrollArchive
+  documents={payslips}
+  employees={allEmployees}
+  openDocument={openDocument}
+  deleteDocument={deleteDocument}
+  downloadYearZip={downloadPayslipsZip}
 />
 
 <DocumentList
@@ -5913,6 +6098,295 @@ fontSize:
 {text}
 </div>
 );
+}
+
+
+/* =========================================================
+ARCHIVIO BUSTE PAGA PER ANNO / MESE
+========================================================= */
+
+function PayrollArchive({
+  documents,
+  employees,
+  openDocument,
+  deleteDocument,
+  downloadYearZip,
+}: any) {
+  const [openYears, setOpenYears] = useState<Record<number, boolean>>({});
+  const [openMonths, setOpenMonths] = useState<Record<string, boolean>>({});
+
+  const years = Array.from(
+    new Set<number>(
+      documents
+        .map((doc: Document) => Number(doc.year))
+        .filter((value: number) => Number.isFinite(value))
+    )
+  ).sort((a, b) => b - a);
+
+  return (
+    <div
+      style={{
+        background: "#172630",
+        border: "1px solid #293c47",
+        borderRadius: 16,
+        padding: 22,
+        marginTop: 20,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 15,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h3 style={{ marginTop: 0, marginBottom: 5 }}>
+            Buste paga caricate
+          </h3>
+          <div style={{ color: "#81919a", fontSize: 13 }}>
+            Archivio organizzato per anno e per mese.
+          </div>
+        </div>
+      </div>
+
+      {years.length === 0 ? (
+        <div style={{ color: "#81919a", marginTop: 15 }}>
+          Nessuna busta paga presente.
+        </div>
+      ) : (
+        <div style={{ marginTop: 15 }}>
+          {years.map((yearValue) => {
+            const yearDocs = documents.filter(
+              (doc: Document) => doc.year === yearValue
+            );
+            const isYearOpen = !!openYears[yearValue];
+
+            return (
+              <div
+                key={yearValue}
+                style={{
+                  border: "1px solid #2b4650",
+                  borderRadius: 12,
+                  overflow: "hidden",
+                  marginBottom: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    padding: 12,
+                    background: "#101e28",
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenYears((current) => ({
+                        ...current,
+                        [yearValue]: !current[yearValue],
+                      }))
+                    }
+                    style={{
+                      flex: 1,
+                      textAlign: "left",
+                      border: "none",
+                      background: "transparent",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontWeight: 900,
+                      fontSize: 17,
+                    }}
+                  >
+                    📅 Anno {yearValue}
+                    <span style={{ color: "#16c784", marginLeft: 10 }}>
+                      ({yearDocs.length} buste) {isYearOpen ? "−" : "+"}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => downloadYearZip(yearValue)}
+                    style={{
+                      ...secondaryButton,
+                      color: "#16c784",
+                      border: "1px solid #16c784",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    ⬇ SCARICA ANNO {yearValue} (.ZIP)
+                  </button>
+                </div>
+
+                {isYearOpen && (
+                  <div style={{ padding: 12 }}>
+                    {MONTHS.map((monthName, index) => {
+                      const monthNumber = index + 1;
+                      const monthDocs = yearDocs.filter(
+                        (doc: Document) => doc.month === monthNumber
+                      );
+                      const monthKey = `${yearValue}-${monthNumber}`;
+                      const isMonthOpen = !!openMonths[monthKey];
+
+                      return (
+                        <div
+                          key={monthKey}
+                          style={{
+                            border: "1px solid #2a3d46",
+                            borderRadius: 10,
+                            marginBottom: 8,
+                            overflow: "hidden",
+                            opacity: monthDocs.length ? 1 : 0.65,
+                          }}
+                        >
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenMonths((current) => ({
+                                ...current,
+                                [monthKey]: !current[monthKey],
+                              }))
+                            }
+                            style={{
+                              width: "100%",
+                              border: "none",
+                              background: monthDocs.length
+                                ? "#132a2b"
+                                : "#0f1d26",
+                              color: "#fff",
+                              padding: "12px 14px",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              cursor: "pointer",
+                              fontWeight: 800,
+                            }}
+                          >
+                            <span>
+                              {monthName}
+                              <span
+                                style={{
+                                  color: "#16c784",
+                                  marginLeft: 8,
+                                  fontSize: 12,
+                                }}
+                              >
+                                {monthDocs.length
+                                  ? `${monthDocs.length} busta/e`
+                                  : "Nessuna busta paga"}
+                              </span>
+                            </span>
+                            <span style={{ color: "#16c784" }}>
+                              {isMonthOpen ? "▲" : "▼"}
+                            </span>
+                          </button>
+
+                          {isMonthOpen && (
+                            <div style={{ padding: 12 }}>
+                              {monthDocs.length === 0 ? (
+                                <div
+                                  style={{
+                                    color: "#81919a",
+                                    fontSize: 13,
+                                  }}
+                                >
+                                  Nessuna busta paga caricata per {monthName} {yearValue}.
+                                </div>
+                              ) : (
+                                monthDocs.map((doc: Document) => {
+                                  const employee = employees.find(
+                                    (emp: Employee) => emp.id === doc.employee_id
+                                  );
+
+                                  return (
+                                    <div
+                                      key={doc.id}
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        gap: 12,
+                                        padding: "12px 0",
+                                        borderBottom: "1px solid #293b45",
+                                        flexWrap: "wrap",
+                                      }}
+                                    >
+                                      <div>
+                                        <strong>
+                                          {employee?.full_name || "Dipendente"}
+                                        </strong>
+                                        <div
+                                          style={{
+                                            color: "#16c784",
+                                            fontSize: 12,
+                                            marginTop: 4,
+                                          }}
+                                        >
+                                          Busta paga · {monthName} {yearValue}
+                                        </div>
+                                        <div
+                                          style={{
+                                            color: "#81919a",
+                                            fontSize: 12,
+                                            marginTop: 3,
+                                          }}
+                                        >
+                                          {doc.file_name}
+                                        </div>
+                                      </div>
+
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          gap: 8,
+                                          flexWrap: "wrap",
+                                        }}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => openDocument(doc)}
+                                          style={{
+                                            ...secondaryButton,
+                                            color: "#16c784",
+                                          }}
+                                        >
+                                          Apri PDF
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => deleteDocument(doc.id)}
+                                          style={{
+                                            ...secondaryButton,
+                                            color: "#ff6b6b",
+                                            border: "1px solid #6d3434",
+                                          }}
+                                        >
+                                          🗑 ELIMINA BUSTA PAGA
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /* =========================================================
