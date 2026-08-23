@@ -312,6 +312,9 @@ useState<ChatMessage[]>([]);
 const [adminLoading, setAdminLoading] =
 useState(false);
 
+const [photoUploading, setPhotoUploading] =
+useState(false);
+
 const [activeSection, setActiveSection] =
 useState("dashboard");
 
@@ -598,6 +601,145 @@ setChatMessages(
 chatData || []
 );
 }
+}
+
+/* =====================================================
+FOTO DIPENDENTE
+===================================================== */
+
+async function uploadEmployeePhoto(
+employeeId: string,
+file: File
+) {
+if (!employeeId || !file) return;
+
+if (!file.type.startsWith("image/")) {
+setMessage("Seleziona un file immagine valido.");
+return;
+}
+
+if (file.size > 8 * 1024 * 1024) {
+setMessage("La foto non può superare 8 MB.");
+return;
+}
+
+setPhotoUploading(true);
+setMessage("");
+
+try {
+// Ridimensiona/comprime la foto direttamente nel browser.
+// In questo modo non serve creare un nuovo bucket Supabase.
+const dataUrl = await new Promise<string>(
+(resolve, reject) => {
+const reader = new FileReader();
+
+reader.onerror = () =>
+reject(
+new Error(
+"Impossibile leggere la foto."
+)
+);
+
+reader.onload = () => {
+const img = new Image();
+
+img.onerror = () =>
+reject(
+new Error(
+"Il file selezionato non è un'immagine valida."
+)
+);
+
+img.onload = () => {
+const maxSize = 600;
+const scale = Math.min(
+1,
+maxSize /
+Math.max(
+img.naturalWidth,
+img.naturalHeight
+)
+);
+
+const canvas =
+document.createElement("canvas");
+
+canvas.width = Math.max(
+1,
+Math.round(
+img.naturalWidth * scale
+)
+);
+canvas.height = Math.max(
+1,
+Math.round(
+img.naturalHeight * scale
+)
+);
+
+const ctx =
+canvas.getContext("2d");
+
+if (!ctx) {
+reject(
+new Error(
+"Impossibile elaborare la foto."
+)
+);
+return;
+}
+
+ctx.drawImage(
+img,
+0,
+0,
+canvas.width,
+canvas.height
+);
+
+resolve(
+canvas.toDataURL(
+"image/jpeg",
+0.82
+)
+);
+};
+img.src =
+String(reader.result);
+};
+reader.readAsDataURL(file);
+}
+);
+
+// Salva la foto nel campo già previsto employees.photo_url.
+const { error } = await supabase
+.from("employees")
+.update({
+photo_url: dataUrl,
+})
+.eq("id", employeeId);
+
+if (error) {
+throw error;
+}
+
+setMessage(
+"Foto del dipendente caricata correttamente. ✅"
+);
+
+await loadAdminData();
+} catch (error: any) {
+console.error(
+"Errore caricamento foto dipendente:",
+error
+);
+
+setMessage(
+error?.message ||
+"Errore durante il caricamento della foto."
+);
+} finally {
+setPhotoUploading(false);
 }
 
 /* =====================================================
@@ -1350,6 +1492,12 @@ uploadDocument
 openDocument={
 openDocument
 }
+uploadEmployeePhoto={
+uploadEmployeePhoto
+}
+photoUploading={
+photoUploading
+}
 logout={logout}
 adminLoading={
 adminLoading
@@ -1655,6 +1803,8 @@ submitting,
 message,
 uploadDocument,
 openDocument,
+uploadEmployeePhoto,
+photoUploading,
 logout,
 adminLoading,
 expiringDocuments,
@@ -1683,6 +1833,8 @@ documentType ===
 documentType ===
 "driver_license";
 
+// Dipendente attualmente selezionato nella sezione "Dipendenti".
+// Alimenta direttamente la scheda del dipendente mostrata sopra l'elenco.
 const selectedEmployeeData =
 allEmployees.find(
 (emp: Employee) =>
@@ -2251,6 +2403,69 @@ Assunto il{" "}
 selectedEmployeeData.hire_date
 )}
 </div>
+)}
+</div>
+
+<div
+style={{
+marginTop: 12,
+display: "flex",
+alignItems: "center",
+gap: 10,
+flexWrap: "wrap",
+}}
+>
+<input
+id={`employee-photo-${selectedEmployeeData.id}`}
+type="file"
+accept="image/*"
+style={{
+display: "none",
+}}
+disabled={photoUploading}
+onChange={(e) => {
+const selectedFile =
+e.target.files?.[0] || null;
+
+if (selectedFile) {
+uploadEmployeePhoto(
+selectedEmployeeData.id,
+selectedFile
+);
+}
+
+e.currentTarget.value = "";
+}}
+/>
+
+<label
+htmlFor={`employee-photo-${selectedEmployeeData.id}`}
+style={{
+...employeeActionButton,
+display: "inline-flex",
+alignItems: "center",
+gap: 7,
+cursor: photoUploading
+? "wait"
+: "pointer",
+opacity: photoUploading ? 0.6 : 1,
+}}
+>
+{photoUploading
+? "CARICAMENTO..."
+: "📷 Carica foto"}
+</label>
+
+{selectedEmployeeData.photo_url && (
+<span
+style={{
+fontSize: 12,
+color: "#16c784",
+fontWeight: 700,
+}}
+>
+Foto presente
+</span>
 )}
 </div>
 </div>
