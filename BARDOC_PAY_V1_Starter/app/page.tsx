@@ -307,9 +307,6 @@ useState<ExtraPayment[]>([]);
 const [chatMessages, setChatMessages] =
 useState<ChatMessage[]>([]);
 
-const [adminChatMessages, setAdminChatMessages] =
-useState<ChatMessage[]>([]);
-
 const [adminLoading, setAdminLoading] =
 useState(false);
 
@@ -473,7 +470,6 @@ setAdminCommunications([]);
 setAttendance([]);
 setExtraPayments([]);
 setChatMessages([]);
-setAdminChatMessages([]);
 
 setEmail("");
 setPassword("");
@@ -651,29 +647,6 @@ ascending: false,
 setAdminCommunications(
 comms || []
 );
-
-/* MESSAGGI CONTATTA AMMINISTRAZIONE */
-const {
-data: adminChatData,
-error: adminChatError,
-} = await supabase
-.from("chat_messages")
-.select("*")
-.order("created_at", {
-ascending: false,
-});
-
-if (!adminChatError) {
-setAdminChatMessages(
-adminChatData || []
-);
-} else {
-console.error(
-"Errore caricamento messaggi:",
-adminChatError
-);
-setAdminChatMessages([]);
-}
 
 setAdminLoading(false);
 }
@@ -1003,43 +976,53 @@ CHAT DIPENDENTE
 ===================================================== */
 
 async function sendEmployeeChatMessage() {
-if (!employee) return;
+if (!employee) return false;
 
 const text =
 chatInput.trim();
 
-if (!text) return;
+if (!text) return false;
 
 setSubmitting(true);
+setMessage("");
 
 try {
+const userId =
+session?.user?.id;
+
+if (!userId) {
+throw new Error(
+"Sessione utente non disponibile. Effettua nuovamente il login."
+);
+}
+
 const {
-error,
+error: insertError,
 } =
 await supabase
 .from("chat_messages")
 .insert({
 employee_id:
 employee.id,
-
 sender_role:
 "employee",
-
 sender_user_id:
-session?.user?.id ||
-null,
-
-message: text,
+userId,
+message:
+text,
 });
 
-if (error) {
-throw error;
+if (insertError) {
+console.error(
+"Errore INSERT chat_messages:",
+insertError
+);
+throw insertError;
 }
-
-setChatInput("");
 
 const {
 data,
+error: selectError,
 } =
 await supabase
 .from("chat_messages")
@@ -1052,19 +1035,38 @@ employee.id
 ascending: true,
 });
 
+if (selectError) {
+console.error(
+"Errore lettura chat_messages:",
+selectError
+);
+throw selectError;
+}
+
 setChatMessages(
 data || []
 );
+
+setChatInput("");
+
+setSubmitting(false);
+
+return true;
 } catch (error: any) {
-console.error(error);
+console.error(
+"Errore invio messaggio amministrazione:",
+error
+);
 
 setMessage(
 error?.message ||
-"Impossibile inviare il messaggio."
+"Impossibile inviare il messaggio. Controlla i permessi Supabase della tabella chat_messages."
 );
-}
 
 setSubmitting(false);
+
+return false;
+}
 }
 
 /* =====================================================
@@ -1277,9 +1279,6 @@ paymentStatements
 }
 communications={
 adminCommunications
-}
-adminChatMessages={
-adminChatMessages
 }
 search={search}
 setSearch={setSearch}
@@ -1612,7 +1611,6 @@ documents,
 payslips,
 paymentStatements,
 communications,
-adminChatMessages,
 search,
 setSearch,
 selectedEmployee,
@@ -1799,20 +1797,6 @@ setActiveSection(
 ⚠️ Scadenze
 </SidebarButton>
 
-<SidebarButton
-active={
-activeSection ===
-"admin_messages"
-}
-onClick={() =>
-setActiveSection(
-"admin_messages"
-)
-}
->
-📨 Messaggi dipendenti
-</SidebarButton>
-
 <div
 style={{
 height: 1,
@@ -1886,6 +1870,9 @@ fontSize: 28,
 : activeSection ===
 "communications"
 ? "Comunicazioni"
+: activeSection ===
+"admin_messages"
+? "Messaggi dipendenti"
 : "Scadenze"}
 </h1>
 
@@ -3073,169 +3060,6 @@ comm.created_at
 )}
 
 {/* =================================================
-MESSAGGI DIPENDENTI
-================================================= */}
-
-{activeSection ===
-"admin_messages" && (
-<>
-<div
-style={{
-display: "flex",
-justifyContent: "space-between",
-alignItems: "center",
-marginBottom: 20,
-}}
->
-<div>
-<h2 style={{ margin: 0 }}>
-📨 Messaggi dipendenti
-</h2>
-<p
-style={{
-margin: "6px 0 0",
-color: "#81919a",
-fontSize: 13,
-}}
->
-Richieste inviate tramite Contatta l'Amministrazione.
-</p>
-</div>
-<div
-style={{
-padding: "8px 12px",
-borderRadius: 10,
-background: "#13222c",
-color: "#16c784",
-fontWeight: 900,
-}}
->
-{adminChatMessages.length} messaggi
-</div>
-</div>
-
-{adminChatMessages.length === 0 ? (
-<div
-style={{
-background: "#172630",
-border: "1px solid #293c47",
-borderRadius: 16,
-padding: 24,
-color: "#81919a",
-}}
->
-Nessun messaggio ricevuto.
-</div>
-) : (
-<div
-style={{
-display: "grid",
-gap: 12,
-}}
->
-{adminChatMessages.map(
-(chat: ChatMessage) => {
-const sender =
-allEmployees.find(
-(emp: Employee) =>
-emp.id ===
-chat.employee_id
-);
-
-return (
-<div
-key={chat.id}
-style={{
-background: "#172630",
-border: "1px solid #293c47",
-borderRadius: 16,
-padding: 18,
-}}
->
-<div
-style={{
-display: "flex",
-justifyContent: "space-between",
-gap: 16,
-alignItems: "flex-start",
-}}
->
-<div>
-<strong
-style={{
-fontSize: 15,
-}}
->
-{sender?.full_name ||
-"Dipendente"}
-</strong>
-
-<div
-style={{
-marginTop: 4,
-color: "#81919a",
-fontSize: 12,
-}}
->
-{sender?.email ||
-"Email non disponibile"}
-</div>
-</div>
-
-<div
-style={{
-color: "#81919a",
-fontSize: 11,
-whiteSpace: "nowrap",
-}}
->
-{formatCommunicationDate(
-chat.created_at
-)}
-</div>
-</div>
-
-<div
-style={{
-marginTop: 14,
-padding: 14,
-background: "#101e28",
-borderRadius: 12,
-color: "#dce6e9",
-lineHeight: 1.6,
-whiteSpace: "pre-wrap",
-}}
->
-{chat.message}
-</div>
-
-<div
-style={{
-marginTop: 10,
-fontSize: 11,
-color:
-chat.sender_role ===
-"employee"
-? "#16c784"
-: "#81919a",
-fontWeight: 800,
-}}
->
-{chat.sender_role ===
-"employee"
-? "MESSAGGIO DEL DIPENDENTE"
-: "AMMINISTRAZIONE"}
-</div>
-</div>
-);
-}
-)}
-</div>
-)}
-</>
-)}
-
-{/* =================================================
 SCADENZE
 ================================================= */}
 
@@ -3320,8 +3144,12 @@ useState<Record<string, boolean>>(
 const [contactOpen, setContactOpen] = useState(false);
 
 async function handleContactSend() {
+const sent =
 await sendChatMessage();
+
+if (sent) {
 setContactOpen(false);
+}
 }
 
 const generalCommunications =
@@ -4503,6 +4331,31 @@ marginBottom:
 }}
 />
 
+{message && (
+<div
+style={{
+marginBottom:
+14,
+padding:
+12,
+borderRadius:
+10,
+background:
+"#3a1d22",
+border:
+"1px solid #7a303b",
+color:
+"#ffb7bf",
+fontSize:
+13,
+lineHeight:
+1.5,
+}}
+>
+{message}
+</div>
+)}
+
 <div
 style={{
 display:
@@ -4527,7 +4380,8 @@ onClick={
 handleContactSend
 }
 disabled={
-!chatInput.trim()
+!chatInput.trim() ||
+submitting
 }
 style={{
 ...greenButton,
@@ -4535,7 +4389,9 @@ flex:
 1,
 }}
 >
-INVIA
+{submitting
+? "INVIO..."
+: "INVIA"}
 </button>
 </div>
 </div>
