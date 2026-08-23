@@ -489,6 +489,12 @@ useState<ChatMessage[]>([]);
 const [adminChatMessages, setAdminChatMessages] =
 useState<ChatMessage[]>([]);
 
+const [adminChatInput, setAdminChatInput] =
+useState("");
+
+const [adminChatSending, setAdminChatSending] =
+useState(false);
+
 const [adminLoading, setAdminLoading] =
 useState(false);
 
@@ -1563,6 +1569,78 @@ return false;
 }
 
 /* =====================================================
+CHAT AMMINISTRAZIONE
+===================================================== */
+
+async function sendAdminChatMessage(
+employeeId: string,
+messageText: string
+) {
+const text =
+messageText.trim();
+
+if (!employeeId || !text) {
+return false;
+}
+
+const userId =
+session?.user?.id;
+
+if (!userId) {
+setMessage(
+"Sessione amministratore non disponibile."
+);
+return false;
+}
+
+setAdminChatSending(true);
+setMessage("");
+
+try {
+const {
+error: insertError,
+} = await supabase
+.from("chat_messages")
+.insert({
+employee_id: employeeId,
+sender_role: "admin",
+sender_user_id: userId,
+message: text,
+});
+
+if (insertError) {
+throw new Error(
+[
+insertError.message,
+insertError.details,
+insertError.hint,
+insertError.code,
+]
+.filter(Boolean)
+.join(" | ")
+);
+}
+
+setAdminChatInput("");
+await loadAdminData();
+return true;
+} catch (error: any) {
+console.error(
+"Errore invio risposta amministrazione:",
+error
+);
+
+setMessage(
+error?.message ||
+"Impossibile inviare la risposta al dipendente."
+);
+return false;
+} finally {
+setAdminChatSending(false);
+}
+}
+
+/* =====================================================
 FILTRO DIPENDENTI
 ===================================================== */
 
@@ -1775,6 +1853,18 @@ adminCommunications
 }
 adminChatMessages={
 adminChatMessages
+}
+adminChatInput={
+adminChatInput
+}
+setAdminChatInput={
+setAdminChatInput
+}
+adminChatSending={
+adminChatSending
+}
+sendAdminChatMessage={
+sendAdminChatMessage
 }
 search={search}
 setSearch={setSearch}
@@ -2123,6 +2213,10 @@ payslips,
 paymentStatements,
 communications,
 adminChatMessages,
+adminChatInput,
+setAdminChatInput,
+adminChatSending,
+sendAdminChatMessage,
 search,
 setSearch,
 selectedEmployee,
@@ -3314,9 +3408,8 @@ openDocument={openDocument}
 deleteDocument={deleteDocument}
 />
 
-<DocumentList
-title="Distinte di pagamento caricate"
-documents={
+<PaymentStatementArchive
+statements={
 paymentStatements
 }
 employees={
@@ -3327,8 +3420,7 @@ openDocument
 }
 deleteDocument={
 deleteDocument
-}
-/>
+}/>
 </>
 )}
 
@@ -3977,7 +4069,7 @@ color: "#81919a",
 fontSize: 13,
 }}
 >
-Richieste inviate tramite Contatta l'Amministrazione.
+Cronologia permanente delle conversazioni dipendente ↔ amministrazione.
 </p>
 </div>
 <div
@@ -4039,12 +4131,20 @@ gap: 16,
 alignItems: "flex-start",
 }}
 >
-<div>
-<strong
+<div
 style={{
-fontSize: 15,
+display: "flex",
+alignItems: "center",
+gap: 12,
 }}
 >
+<EmployeeAvatar
+employee={sender || null}
+size={48}
+/>
+
+<div>
+<strong style={{ fontSize: 15 }}>
 {sender?.full_name ||
 "Dipendente"}
 </strong>
@@ -4058,6 +4158,7 @@ fontSize: 12,
 >
 {sender?.email ||
 "Email non disponibile"}
+</div>
 </div>
 </div>
 
@@ -4078,7 +4179,10 @@ chat.created_at
 style={{
 marginTop: 14,
 padding: 14,
-background: "#101e28",
+background:
+chat.sender_role === "employee"
+? "#101e28"
+: "#12342d",
 borderRadius: 12,
 color: "#dce6e9",
 lineHeight: 1.6,
@@ -4091,6 +4195,15 @@ whiteSpace: "pre-wrap",
 <div
 style={{
 marginTop: 10,
+display: "flex",
+justifyContent: "space-between",
+alignItems: "center",
+gap: 10,
+flexWrap: "wrap",
+}}
+>
+<div
+style={{
 fontSize: 11,
 color:
 chat.sender_role ===
@@ -4103,8 +4216,194 @@ fontWeight: 800,
 {chat.sender_role ===
 "employee"
 ? "MESSAGGIO DEL DIPENDENTE"
-: "AMMINISTRAZIONE"}
+: "RISPOSTA DELL'AMMINISTRAZIONE"}
 </div>
+
+<button
+type="button"
+onClick={() => {
+setSelectedChatEmployee(
+chat.employee_id
+);
+setAdminChatInput("");
+}}
+style={{
+...secondaryButton,
+color: "#16c784",
+border: "1px solid #16c784",
+}}
+>
+💬 Rispondi
+</button>
+</div>
+
+{selectedChatEmployee ===
+chat.employee_id && (
+<div
+style={{
+marginTop: 14,
+padding: 14,
+background: "#0d1922",
+border:
+"1px solid #16c784",
+borderRadius: 12,
+}}
+>
+<div
+style={{
+fontSize: 12,
+fontWeight: 900,
+color: "#16c784",
+marginBottom: 8,
+}}
+>
+CONVERSAZIONE CON{" "}
+{sender?.full_name ||
+"DIPENDENTE"}
+</div>
+
+<div
+style={{
+maxHeight: 240,
+overflowY: "auto",
+display: "grid",
+gap: 8,
+marginBottom: 12,
+}}
+>
+{adminChatMessages
+.filter(
+(item: ChatMessage) =>
+item.employee_id ===
+chat.employee_id
+)
+.sort(
+(a: ChatMessage, b: ChatMessage) =>
+new Date(a.created_at).getTime() -
+new Date(b.created_at).getTime()
+)
+.map(
+(item: ChatMessage) => (
+<div
+key={item.id}
+style={{
+padding: "9px 11px",
+borderRadius: 9,
+background:
+item.sender_role ===
+"admin"
+? "#12342d"
+: "#172630",
+border:
+"1px solid #293c47",
+}}
+>
+<div
+style={{
+fontSize: 10,
+fontWeight: 900,
+color:
+item.sender_role ===
+"admin"
+? "#16c784"
+: "#a9b8c0",
+marginBottom: 4,
+}}
+>
+{item.sender_role ===
+"admin"
+? "AMMINISTRAZIONE"
+: "DIPENDENTE"}{" "}
+·{" "}
+{formatCommunicationDate(
+item.created_at
+)}
+</div>
+<div
+style={{
+fontSize: 13,
+color: "#dce6e9",
+whiteSpace: "pre-wrap",
+}}
+>
+{item.message}
+</div>
+</div>
+)
+)}
+</div>
+
+<div
+style={{
+display: "flex",
+gap: 8,
+alignItems: "flex-end",
+}}
+>
+<textarea
+value={adminChatInput}
+onChange={(e) =>
+setAdminChatInput(
+e.target.value
+)
+}
+placeholder="Scrivi una risposta al dipendente..."
+rows={3}
+style={{
+...darkInput,
+resize: "vertical",
+}}
+/>
+
+<button
+type="button"
+disabled={
+adminChatSending ||
+!adminChatInput.trim()
+}
+onClick={async () => {
+const sent =
+await sendAdminChatMessage(
+chat.employee_id,
+adminChatInput
+);
+
+if (sent) {
+setSelectedChatEmployee("");
+}
+}}
+style={{
+...greenButton,
+width: "auto",
+minWidth: 150,
+opacity:
+adminChatSending ||
+!adminChatInput.trim()
+? 0.55
+: 1,
+}}
+>
+{adminChatSending
+? "INVIO..."
+: "INVIA RISPOSTA"}
+</button>
+</div>
+
+<button
+type="button"
+onClick={() =>
+setSelectedChatEmployee("")
+}
+style={{
+...secondaryButton,
+marginTop: 8,
+fontSize: 11,
+}}
+>
+Chiudi conversazione
+</button>
+</div>
+)}
 </div>
 );
 }
@@ -6365,6 +6664,304 @@ padding: "8px 12px",
 </button>
 </div>
 ))}
+</div>
+</div>
+);
+})}
+</div>
+)}
+</div>
+);
+})
+)}
+</div>
+);
+}
+
+/* =========================================================
+ARCHIVIO DISTINTE DI PAGAMENTO
+========================================================= */
+
+function PaymentStatementArchive({
+statements,
+employees,
+openDocument,
+deleteDocument,
+}: {
+statements: Document[];
+employees: Employee[];
+openDocument: (doc: Document) => void;
+deleteDocument: (id: string) => void;
+}) {
+const [openYears, setOpenYears] =
+useState<Record<number, boolean>>({});
+
+const years = useMemo(() => {
+return Array.from(
+new Set(
+statements.map(
+(doc) => doc.year
+)
+)
+).sort((a, b) => b - a);
+}, [statements]);
+
+return (
+<div
+style={{
+background: "#172630",
+border: "1px solid #293c47",
+borderRadius: 16,
+padding: 22,
+marginTop: 20,
+}}
+>
+<div>
+<h3 style={{ margin: "0 0 5px" }}>
+📚 Archivio distinte di pagamento
+</h3>
+<div
+style={{
+color: "#81919a",
+fontSize: 12,
+}}
+>
+Documenti organizzati per anno e mese.
+</div>
+</div>
+
+{years.length === 0 ? (
+<div
+style={{
+color: "#81919a",
+marginTop: 16,
+}}
+>
+Nessuna distinta di pagamento presente.
+</div>
+) : (
+years.map((year) => {
+const yearDocs =
+statements
+.filter(
+(doc) =>
+doc.year === year
+)
+.sort(
+(a, b) =>
+(a.month || 99) -
+(b.month || 99)
+);
+
+const isOpen =
+!!openYears[year];
+
+return (
+<div
+key={year}
+style={{
+border:
+"1px solid #2c414b",
+borderRadius: 14,
+marginTop: 12,
+overflow: "hidden",
+}}
+>
+<div
+style={{
+display: "flex",
+alignItems: "center",
+background:
+isOpen
+? "#12342d"
+: "#101e28",
+padding: 12,
+}}
+>
+<button
+type="button"
+onClick={() =>
+setOpenYears(
+(prev) => ({
+...prev,
+[year]: !prev[year],
+})
+)
+}
+style={{
+flex: 1,
+border: "none",
+background:
+"transparent",
+color: "#fff",
+padding:
+"7px 8px",
+textAlign: "left",
+cursor: "pointer",
+fontWeight: 900,
+fontSize: 16,
+}}
+>
+📅 Anno {year} ·{" "}
+{yearDocs.length}{" "}
+{yearDocs.length ===
+1
+? "distinta"
+: "distinte"}
+<span
+style={{
+color: "#16c784",
+marginLeft: 10,
+}}
+>
+{isOpen ? "−" : "+"}
+</span>
+</button>
+</div>
+
+{isOpen && (
+<div
+style={{
+padding: 12,
+}}
+>
+{MONTHS.map(
+(
+monthName,
+index
+) => {
+const monthNumber =
+index + 1;
+
+const monthDocs =
+yearDocs.filter(
+(doc) =>
+doc.month ===
+monthNumber
+);
+
+return (
+<div
+key={`${year}-${monthNumber}`}
+style={{
+display: "flex",
+justifyContent:
+"space-between",
+alignItems:
+"center",
+gap: 12,
+flexWrap: "wrap",
+padding:
+"12px 14px",
+borderBottom:
+index === 11
+? "none"
+: "1px solid #243943",
+background:
+monthDocs.length
+? "#101e28"
+: "#0c171e",
+}}
+>
+<div>
+<strong>
+{monthName}
+</strong>
+<div
+style={{
+color:
+monthDocs.length
+? "#16c784"
+: "#667780",
+fontSize: 11,
+marginTop: 4,
+}}
+>
+{monthDocs.length
+? `${monthDocs.length} distinta${monthDocs.length > 1 ? "e" : ""} presente${monthDocs.length > 1 ? "i" : ""}`
+: "Nessuna distinta caricata"}
+</div>
+</div>
+
+<div
+style={{
+display: "flex",
+gap: 8,
+flexWrap:
+"wrap",
+}}
+>
+{monthDocs.map(
+(doc) => {
+const emp =
+employees.find(
+(item) =>
+item.id ===
+doc.employee_id
+);
+
+return (
+<div
+key={doc.id}
+style={{
+display: "flex",
+gap: 8,
+alignItems:
+"center",
+flexWrap:
+"wrap",
+}}
+>
+<div
+style={{
+color:
+"#cbd6da",
+fontSize: 12,
+}}
+>
+{emp?.full_name ||
+"Dipendente"}{" "}
+·{" "}
+{doc.file_name}
+</div>
+
+<button
+type="button"
+onClick={() =>
+openDocument(doc)
+}
+style={{
+...secondaryButton,
+color:
+"#16c784",
+padding:
+"8px 12px",
+}}
+>
+Apri PDF
+</button>
+
+<button
+type="button"
+onClick={() =>
+deleteDocument(doc.id)
+}
+style={{
+...secondaryButton,
+color:
+"#ff6b6b",
+border:
+"1px solid #6d3434",
+padding:
+"8px 12px",
+}}
+>
+🗑 Elimina
+</button>
+</div>
+);
+}
+)}
 </div>
 </div>
 );
